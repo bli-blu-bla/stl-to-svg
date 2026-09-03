@@ -1,0 +1,25 @@
+{
+  "name": "stl-to-svg",
+  "version": "1.0.0",
+  "description": "Convert 3D STL files to 2D SVG paths for laser cutting and CNC routing",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "npm run test:unit && npm run build && npm run test:e2e",
+    "test:unit": "node --test \"test/*.test.mjs\"",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "polygon-clipping": "^0.15.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.185.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.2.2"
+  }
+}

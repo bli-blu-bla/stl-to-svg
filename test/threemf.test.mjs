@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parse3MF, parse3MFObjects, isZip, compose, parseTransform } from '../src/lib/threemf.js';
+import { parse3MF, parse3MFObjects, isZip, compose, parseTransform, isTurnAboutZ, sameShape } from '../src/lib/threemf.js';
 import { parseModel, parseModelObjects } from '../src/lib/model.js';
 import { boundsOf } from '../src/lib/plane.js';
 import { cube, box, encodeBinarySTL, encode3MF, encodeZip, modelXML } from './fixtures.mjs';
@@ -111,7 +111,7 @@ test('names objects from Bambu Studio\'s config, numbers duplicates, falls back'
   <object id="2"><metadata key="name" value="Bottom.stl"/></object>
 </config>`;
   const zip = encode3MF(
-    { objects: { 1: CUBE, 2: CUBE, 3: CUBE }, items: [{ objectid: 1 }, { objectid: 2 }, { objectid: 3 }] },
+    { objects: { 1: CUBE, 2: cube(5), 3: cube(7) }, items: [{ objectid: 1 }, { objectid: 2 }, { objectid: 3 }] },
     { 'Metadata/model_settings.config': config },
   );
   const objs = await parseModelObjects(zip, 'case.3mf');
@@ -123,4 +123,37 @@ test('a single-object 3MF or an STL is one entry named after the file', async ()
   assert.deepEqual(one.map((o) => o.name), ['thing.3mf']);
   const stl = await parseModelObjects(encodeBinarySTL(CUBE), 'cube.stl');
   assert.deepEqual(stl.map((o) => o.name), ['cube.stl']);
+});
+
+test('identical objects are listed once, counting their copies', async () => {
+  const zip = encode3MF({
+    objects: {
+      1: { name: 'Leg', mesh: box(0, 0, 0, 10, 20, 30) },
+      2: { name: 'Leg copy', mesh: box(50, 50, 0, 60, 70, 30) }, // same shape, its own object
+      3: { name: 'Top', mesh: box(0, 0, 0, 40, 40, 5) },
+    },
+    items: [
+      { objectid: 1 },
+      { objectid: 1, transform: '1 0 0 0 1 0 0 0 1 30 0 0' }, // moved
+      { objectid: 1, transform: '0 1 0 -1 0 0 0 0 1 80 0 0' }, // turned 90° about Z
+      { objectid: 2 },
+      { objectid: 1, transform: '1 0 0 0 0 1 0 -1 0 0 0 0' }, // laid on its side: different
+      { objectid: 3 },
+    ],
+  });
+  const objs = await parseModelObjects(zip, 'table.3mf');
+  assert.deepEqual(objs.map((o) => [o.name, o.copies]), [['Leg', 4], ['Leg (2)', 1], ['Top', 1]]);
+  // The merged list is opt-in: the plain reader keeps every item.
+  assert.equal((await parse3MFObjects(zip)).length, 6);
+  assert.equal((await parse3MF(zip)).length / 9, 72);
+});
+
+test('isTurnAboutZ and sameShape', () => {
+  const id = parseTransform('');
+  assert.ok(isTurnAboutZ(id, parseTransform('0.6 0.8 0 -0.8 0.6 0 0 0 1 5 5 5')));
+  assert.ok(!isTurnAboutZ(id, parseTransform('-1 0 0 0 1 0 0 0 1 0 0 0'))); // mirrored
+  assert.ok(!isTurnAboutZ(id, parseTransform('2 0 0 0 2 0 0 0 2 0 0 0'))); // scaled
+  const a = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+  assert.ok(sameShape(a, new Float32Array([5, 5, 5, 6, 5, 5, 5, 6, 5])));
+  assert.ok(!sameShape(a, new Float32Array([0, 0, 0, 2, 0, 0, 0, 1, 0])));
 });

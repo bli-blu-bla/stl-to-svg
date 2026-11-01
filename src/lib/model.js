@@ -12,21 +12,22 @@ export async function parseModel(buffer) {
 }
 
 // The file as the objects a person would pick between: an STL is one object;
-// a 3MF yields one per object on its build plate. 3MF objects are centred in
+// a 3MF yields one per distinct object on its build plate (`copies` counts
+// the identical ones it stands for). 3MF objects are centred in
 // X and Y — a plate position means nothing once an object is worked on alone —
 // while Z is kept, so each still stands where it stood.
 export async function parseModelObjects(buffer, fileName) {
-  if (!isZip(buffer)) return [{ name: fileName, positions: parseSTL(buffer) }];
+  if (!isZip(buffer)) return [{ name: fileName, positions: parseSTL(buffer), copies: 1 }];
 
-  const objects = await parse3MFObjects(buffer);
-  if (objects.length === 1) return [{ name: fileName, positions: centerXY(objects[0].positions) }];
+  const objects = await parse3MFObjects(buffer, { merge: true });
+  if (objects.length === 1) return [{ name: fileName, positions: centerXY(objects[0].positions), copies: objects[0].copies }];
 
   const used = new Map();
   return objects.map((o, i) => {
     const base = o.name || `Object ${i + 1}`;
     const n = (used.get(base) || 0) + 1;
     used.set(base, n);
-    return { name: n > 1 ? `${base} (${n})` : base, positions: centerXY(o.positions) };
+    return { name: n > 1 ? `${base} (${n})` : base, positions: centerXY(o.positions), copies: o.copies };
   });
 }
 

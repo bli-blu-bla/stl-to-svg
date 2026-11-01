@@ -28,7 +28,8 @@ const PLATE_3MF = write('plate.3mf', encode3MF({
     1: { name: 'Lid', mesh: box(100, 100, 0, 120, 110, 4) },
     2: { name: 'Base', mesh: box(150, 90, 0, 160, 130, 12) },
   },
-  items: [{ objectid: 1 }, { objectid: 2 }],
+  // A second lid, moved: identical, so listed once.
+  items: [{ objectid: 1 }, { objectid: 2 }, { objectid: 1, transform: '1 0 0 0 1 0 0 0 1 0 30 0' }],
 }));
 const CUBE_ASCII = write('cube.stl', new TextEncoder().encode(encodeAsciiSTL(cube(10))).buffer);
 
@@ -384,15 +385,16 @@ test('reads 3MF files and converts them like STL', async ({ page }) => {
   expect(dl.suggestedFilename()).toMatch(/^cube-section-XY-.*\.svg$/);
 });
 
-test('a 3MF with several objects lists them separately, centred', async ({ page }) => {
+test('a 3MF with several objects lists each different one, centred', async ({ page }) => {
   await upload(page, PLATE_3MF);
   const rows = page.locator('.file-row');
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0).locator('.name')).toHaveText('Lid');
+  await expect(rows.nth(0)).toContainText('×2 · 12 tri');
   await expect(rows.nth(1).locator('.name')).toHaveText('Base');
   await expect(rows.nth(1)).toContainText('from plate.3mf');
   await expect(rows.nth(1)).toContainText('10.0 × 40.0 × 12.0 mm');
-  await expect(page.locator('.note')).toContainText('plate.3mf holds 2 objects');
+  await expect(page.locator('.note')).toContainText('plate.3mf holds 3 objects (2 different)');
 
   // Only the picked object is converted.
   await rows.nth(1).locator('.pick').click();

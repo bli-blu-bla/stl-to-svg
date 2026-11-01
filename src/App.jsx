@@ -129,6 +129,7 @@ export default function App() {
           id: nextId.current++,
           upload,
           name: o.name,
+          copies: o.copies,
           source: objects.length > 1 ? file.name : null,
           size: file.size,
           positions: o.positions,
@@ -143,7 +144,11 @@ export default function App() {
     const split = new Map();
     for (const f of loaded) if (f.source) split.set(f.upload, [...(split.get(f.upload) || []), f]);
     if (split.size) {
-      setNotice({ text: [...split.values()].map((g) => `${g[0].source} holds ${g.length} objects`).join(' · ') + ' — each is listed separately; select one to convert it.' });
+      const describe = (g) => {
+        const total = g.reduce((n, f) => n + f.copies, 0);
+        return `${g[0].source} holds ${total} objects${total > g.length ? ` (${g.length} different)` : ''}`;
+      };
+      setNotice({ text: [...split.values()].map(describe).join(' · ') + ' — each different one is listed once; select one to convert it.' });
     }
 
     const heavy = [...new Set(loaded.filter((f) => !f.error && f.size > LARGE_FILE_BYTES).map((f) => f.upload))];
@@ -359,7 +364,7 @@ export default function App() {
                       {f.source && <div className="source" title={f.source}>from {f.source}</div>}
                       {f.error
                         ? <div className="err">{f.error}</div>
-                        : <div className="meta">{f.triangles.toLocaleString('en-US')} tri · {f.bounds.size.map((v) => v.toFixed(1)).join(' × ')} mm</div>}
+                        : <div className="meta">{f.copies > 1 && `×${f.copies} · `}{f.triangles.toLocaleString('en-US')} tri · {f.bounds.size.map((v) => v.toFixed(1)).join(' × ')} mm</div>}
                     </button>
                     <button className="btn icon" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.id)}><CloseIcon /></button>
                   </li>

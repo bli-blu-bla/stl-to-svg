@@ -39,7 +39,9 @@ export async function parse3MF(buffer) {
 
 // One entry per build item — what a slicer shows as separate objects — each
 // with its name (if the file has one) and its plate transform applied.
-export async function parse3MFObjects(buffer) {
+// With `merge`, identical objects are listed once, `copies` counting them:
+// the same geometry, whether only moved or also turned about Z on the plate.
+export async function parse3MFObjects(buffer, { merge = false } = {}) {
   const zip = readZip(buffer);
   const root = await rootModelPath(zip);
 
@@ -85,16 +87,44 @@ export async function parse3MFObjects(buffer) {
     }
     trail.delete(key);
   };
+  // Each object's own geometry is built once, however many items place it.
+  const local = new Map();
+  const shapeOf = (path, id) => {
+    const key = `${path}#${id}`;
+    if (!local.has(key)) {
+      out = new Grower();
+      emit(path, id, IDENTITY, 0, new Set());
+      local.set(key, out.result());
+    }
+    return local.get(key);
+  };
+
   const objects = [];
-  for (const item of rootModel.items) {
-    out = new Grower();
+  const seen = []; // With `merge`: what each listed object was made from.
+  items: for (const item of rootModel.items) {
     const path = item.path || root;
-    emit(path, item.objectid, item.transform, 0, new Set());
-    const positions = out.result();
-    if (!positions.length) continue; // e.g. a support-only item
-    if (scale !== 1) for (let i = 0; i < positions.length; i++) positions[i] *= scale;
+    const shape = shapeOf(path, item.objectid);
+    if (!shape.length) continue; // e.g. a support-only item
+    if (merge) {
+      // The same geometry lying the same way up, only moved or turned on the plate.
+      for (const s of seen) {
+        if (sameShape(s.shape, shape) && isTurnAboutZ(s.transform, item.transform)) { s.object.copies++; continue items; }
+      }
+    }
+    const positions = transformed(shape, item.transform);
+    if (merge) {
+      // Or different objects, or differently built ones, that end up identical.
+      for (const s of seen) {
+        if (sameShape(s.object.positions, positions)) { s.object.copies++; continue items; }
+      }
+    }
     const name = models.get(path)?.objects.get(item.objectid)?.name || (path === root ? names.get(item.objectid) : null);
-    objects.push({ name: name || null, positions });
+    const object = { name: name || null, positions, copies: 1 };
+    objects.push(object);
+    if (merge) seen.push({ shape, transform: item.transform, object });
+  }
+  if (scale !== 1) {
+    for (const { positions } of objects) for (let i = 0; i < positions.length; i++) positions[i] *= scale;
   }
   if (!objects.length) throw new ThreeMFError('No triangles found in this 3MF file.');
   return objects;
@@ -233,6 +263,51 @@ export function compose(a, b) {
   }
   for (let j = 0; j < 3; j++) r[9 + j] = a[9] * b[j] + a[10] * b[3 + j] + a[11] * b[6 + j] + b[9 + j];
   return r;
+}
+
+function transformed(p, m) {
+  const r = new Float32Array(p.length);
+  for (let i = 0; i < p.length; i += 3) {
+    const x = p[i]; const y = p[i + 1]; const z = p[i + 2];
+    r[i] = x * m[0] + y * m[3] + z * m[6] + m[9];
+    r[i + 1] = x * m[1] + y * m[4] + z * m[7] + m[10];
+    r[i + 2] = x * m[2] + y * m[5] + z * m[8] + m[11];
+  }
+  return r;
+}
+
+// The same triangles, vertex for vertex, up to a shift.
+export function sameShape(a, b) {
+  if (a.length !== b.length || !a.length) return false;
+  let extent = 0;
+  for (let i = 0; i < a.length; i++) extent = Math.max(extent, Math.abs(a[i] - a[i % 3]));
+  const tol = Math.max(1e-6, extent * 1e-5); // Float32 rounding.
+  const dx = b[0] - a[0]; const dy = b[1] - a[1]; const dz = b[2] - a[2];
+  for (let i = 0; i < a.length; i += 3) {
+    if (Math.abs(b[i] - a[i] - dx) > tol || Math.abs(b[i + 1] - a[i + 1] - dy) > tol || Math.abs(b[i + 2] - a[i + 2] - dz) > tol) return false;
+  }
+  return true;
+}
+
+// Whether placing with `b` is placing with `a`, then turning about the Z axis
+// (and moving): b = a · Q with Q a rotation that keeps Z.
+export function isTurnAboutZ(a, b) {
+  const det = a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
+  if (Math.abs(det) < 1e-12) return false;
+  // inv(a), 3×3 linear part.
+  const inv = [
+    (a[4] * a[8] - a[5] * a[7]) / det, (a[2] * a[7] - a[1] * a[8]) / det, (a[1] * a[5] - a[2] * a[4]) / det,
+    (a[5] * a[6] - a[3] * a[8]) / det, (a[0] * a[8] - a[2] * a[6]) / det, (a[2] * a[3] - a[0] * a[5]) / det,
+    (a[3] * a[7] - a[4] * a[6]) / det, (a[1] * a[6] - a[0] * a[7]) / det, (a[0] * a[4] - a[1] * a[3]) / det,
+  ];
+  const q = new Array(9);
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 3; j++) q[i * 3 + j] = inv[i * 3] * b[j] + inv[i * 3 + 1] * b[3 + j] + inv[i * 3 + 2] * b[6 + j];
+  }
+  const eps = 1e-5;
+  const near = (x, y) => Math.abs(x - y) < eps;
+  return near(q[2], 0) && near(q[5], 0) && near(q[6], 0) && near(q[7], 0) && near(q[8], 1)
+    && near(q[0], q[4]) && near(q[1], -q[3]) && near(q[0] * q[0] + q[1] * q[1], 1);
 }
 
 function addMesh(out, obj, m) {

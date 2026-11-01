@@ -58,6 +58,38 @@ export default function Settings({ s, set, range, disabled, children }) {
         <span className="field-hint">{plane.hint}</span>
       </div>
 
+      {!intersection && (
+        <div className="field">
+          <span className="field-label" id="detail-label">Detail</span>
+          <div className="seg" role="radiogroup" aria-labelledby="detail-label">
+            {[['outline', 'Outline'], ['edges', 'All edges']].map(([detail, label]) => (
+              <button
+                key={detail}
+                role="radio"
+                aria-checked={s.detail === detail}
+                onClick={() => set({ detail })}
+                title={detail === 'outline'
+                  ? 'Only the silhouette, holes included'
+                  : 'A drawing view: outline plus every visible step, ledge, hole and chamfer'}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {s.detail === 'edges' && (
+            <>
+              <div className="field-head" style={{ marginTop: 6 }}>
+                <label htmlFor="edge-angle">Edge angle</label>
+                <span className="mono">{s.edgeAngle}°</span>
+              </div>
+              <input id="edge-angle" type="range" min="5" max="90" step="1"
+                value={s.edgeAngle} onChange={(e) => set({ edgeAngle: +e.target.value })} />
+              <span className="field-hint">Faces meeting at a sharper angle draw a line. Lower it to show more of curved surfaces.</span>
+            </>
+          )}
+        </div>
+      )}
+
       {s.planeKey === 'custom' && (
         <div className="grid-2">
           <div className="field">
@@ -118,7 +150,7 @@ export default function Settings({ s, set, range, disabled, children }) {
             {Object.entries(UNITS).map(([k, u]) => <option key={k} value={k}>{u.label}</option>)}
           </select>
         </div>
-        {!intersection && (
+        {!intersection && s.detail === 'outline' && (
           <div className="field">
             <label htmlFor="q">Quality</label>
             <select id="q" value={s.quality} onChange={(e) => set({ quality: e.target.value })}>

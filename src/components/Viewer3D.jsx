@@ -200,10 +200,13 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey, theme = 
     ctx.planeMesh.position.copy(n).multiplyScalar(offset);
 
     // For projection the plane is a viewing surface: show which way we look.
-    const start = n.clone().multiplyScalar(ctx.radius * 1.6);
+    // The viewer sits on the side of u × v, which keeps the 2D drawing
+    // unmirrored (for XZ that is the usual front view, from −Y).
+    const eye = new THREE.Vector3(...basis.u).cross(new THREE.Vector3(...basis.v)).normalize();
+    const start = eye.clone().multiplyScalar(ctx.radius * 1.6);
     if (ctx.center) start.add(ctx.center.clone().projectOnPlane(n));
     ctx.arrow.position.copy(start);
-    ctx.arrow.setDirection(n.clone().negate());
+    ctx.arrow.setDirection(eye.clone().negate());
     ctx.arrow.setLength(ctx.radius * 1.1, ctx.radius * 0.22, ctx.radius * 0.12);
   }, [basis, offset, mode, theme]);
 

@@ -1,6 +1,7 @@
 import { basisFor } from './plane.js';
 import { sliceMesh } from './slice.js';
 import { projectMesh } from './project.js';
+import { projectEdges } from './edges.js';
 import { buildSVG } from './svg.js';
 
 self.onmessage = (e) => {
@@ -25,7 +26,9 @@ self.onmessage = (e) => {
     progress(settings.mode === 'intersection' ? 'Slicing' : 'Projecting', 0);
     const paths = settings.mode === 'intersection'
       ? sliceMesh(positions, basis, settings.offset, tolerance)
-      : projectMesh(positions, basis, tolerance, settings.quality, progress);
+      : settings.detail === 'edges'
+        ? projectEdges(positions, basis, tolerance, settings.edgeAngle, progress)
+        : projectMesh(positions, basis, tolerance, settings.quality, progress);
 
     if (!paths.length) {
       self.postMessage({ id, error: settings.mode === 'intersection'

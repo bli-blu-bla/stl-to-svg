@@ -28,6 +28,8 @@ const DEFAULTS = {
   resolution: 0.1,
   strokeWidth: 0.1,
   quality: 'auto',
+  detail: 'outline', // Projection: 'outline' (silhouette) or 'edges' (drawing view)
+  edgeAngle: 30,
 };
 
 const PLANE_NAME = (s) => (s.planeKey === 'custom' ? `custom ${s.yaw}°/${s.pitch}°` : s.planeKey);
@@ -35,7 +37,11 @@ const PLANE_SLUG = (s) => (s.planeKey === 'custom' ? `custom-${s.yaw}-${s.pitch}
 
 // Human label and file-name part describing what a cut was made with.
 function describeCut(s) {
-  if (s.mode === 'projection') return { label: `Projection · ${PLANE_NAME(s)}`, slug: `projection-${PLANE_SLUG(s)}` };
+  if (s.mode === 'projection') {
+    return s.detail === 'edges'
+      ? { label: `Edges · ${PLANE_NAME(s)} · ${s.edgeAngle}°`, slug: `edges-${PLANE_SLUG(s)}` }
+      : { label: `Projection · ${PLANE_NAME(s)}`, slug: `projection-${PLANE_SLUG(s)}` };
+  }
   const off = s.offset.toFixed(2);
   return { label: `Section · ${PLANE_NAME(s)} @ ${off} mm`, slug: `section-${PLANE_SLUG(s)}-${off}mm` };
 }
@@ -47,7 +53,9 @@ function cutKey(fileId, s) {
     s.planeKey === 'custom' ? [s.yaw, s.pitch] : null,
     s.mode === 'intersection' ? Math.round(s.offset * 1e6) : null,
     s.resolution, s.strokeWidth, s.unit,
-    s.mode === 'projection' ? s.quality : null,
+    s.mode === 'projection' ? s.detail : null,
+    s.mode === 'projection' && s.detail === 'outline' ? s.quality : null,
+    s.mode === 'projection' && s.detail === 'edges' ? s.edgeAngle : null,
   ]);
 }
 
@@ -194,6 +202,8 @@ export default function App() {
         unit: s.unit,
         stroke: '#000000',
         quality: s.quality,
+        detail: s.detail,
+        edgeAngle: s.edgeAngle,
         title: f.name,
       };
       const label = usable.length > 1 ? `${f.name} (${index}/${usable.length})` : f.name;
@@ -350,7 +360,9 @@ export default function App() {
               <span className="swatch" style={{ background: s.mode === 'intersection' ? 'var(--accent)' : 'var(--measure)' }} />
               {s.mode === 'intersection'
                 ? <span><strong>Cutting plane</strong> — every edge where this plane meets the model becomes a path.</span>
-                : <span><strong>Projection surface</strong> — the arrow shows the direction the silhouette is seen from.</span>}
+                : s.detail === 'edges'
+                  ? <span><strong>Drawing view</strong> — seen along the arrow: outline plus every visible step, hole and chamfer.</span>
+                  : <span><strong>Projection surface</strong> — the arrow shows the direction the silhouette is seen from.</span>}
             </p>
           </section>
 

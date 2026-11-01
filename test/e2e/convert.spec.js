@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cube, torus, encodeBinarySTL, encodeAsciiSTL } from '../fixtures.mjs';
+import { box, cube, torus, encodeBinarySTL, encodeAsciiSTL } from '../fixtures.mjs';
 
 // Fixtures are written to a temp dir at run time — no binaries in the repo.
 const dir = mkdtempSync(join(tmpdir(), 'stl-e2e-'));
@@ -14,6 +14,8 @@ const write = (name, buf) => {
 const TORUS = write('torus.stl', encodeBinarySTL(torus()));
 // A part three times taller than wide — its preview must still fit its box.
 const TALL = write('tall.stl', encodeBinarySTL(cube(10).map((t) => t.map(([x, y, z]) => [x, y * 3, z]))));
+// A plate with a boss on top: its top view has an inner step the outline hides.
+const STEPPED = write('stepped.stl', encodeBinarySTL([...box(-10, -10, 0, 10, 10, 5), ...box(-5, -5, 5, 5, 5, 10)]));
 const CUBE_ASCII = write('cube.stl', new TextEncoder().encode(encodeAsciiSTL(cube(10))).buffer);
 
 // "Convert to SVG" for one file, "Convert 2 files" for a batch, "Converting…" while busy.
@@ -328,4 +330,20 @@ test('measurements survive closing and reopening the measuring view', async ({ p
   await convert(page);
   await open();
   await expect(view.locator('.measure-list li')).toHaveCount(0);
+});
+
+test('all-edges projection draws steps the outline leaves out', async ({ page }) => {
+  await upload(page, STEPPED);
+  await page.getByRole('radio', { name: 'Projection' }).click();
+  await convert(page);
+  await expect(page.locator('.result-card .stats')).toContainText('1 path');
+
+  await page.getByRole('radio', { name: 'All edges' }).click();
+  await expect(page.locator('#edge-angle')).toBeVisible();
+  await convert(page);
+  const card = page.locator('.result-card').first();
+  await expect(card.locator('.cut-label')).toHaveText('Edges · XY · 30°');
+  await expect(card.locator('.stats')).toContainText('2 paths');
+  // Both views are kept side by side.
+  await expect(page.locator('.result-card')).toHaveCount(2);
 });

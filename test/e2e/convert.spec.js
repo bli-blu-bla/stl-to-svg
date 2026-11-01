@@ -409,3 +409,31 @@ test('a 3MF with several objects lists each different one, centred', async ({ pa
   await expect(rows).toHaveCount(6);
   await expect(page.locator('.note.error')).toHaveCount(0);
 });
+
+test('open files survive a reload, but not into a new tab', async ({ page, context }) => {
+  await upload(page, PLATE_3MF, CUBE_ASCII);
+  const rows = page.locator('.file-row');
+  await expect(rows).toHaveCount(3);
+  await rows.nth(1).locator('.pick').click();
+  await expect(rows.nth(1)).toHaveClass(/active/);
+
+  await page.reload();
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0).locator('.name')).toHaveText('Lid');
+  await expect(rows.nth(0)).toContainText('×2 · 12 tri');
+  await expect(rows.nth(1)).toHaveClass(/active/);
+  await expect(rows.nth(2).locator('.name')).toHaveText('cube.stl');
+
+  // Removing is kept too.
+  await page.getByRole('button', { name: 'Remove cube.stl' }).click();
+  await expect(rows).toHaveCount(2);
+  await page.reload();
+  await expect(page.locator('main[data-restored]')).toBeVisible();
+  await expect(rows).toHaveCount(2);
+
+  // A fresh tab is a fresh session.
+  const other = await context.newPage();
+  await other.goto(page.url());
+  await expect(other.locator('main[data-restored]')).toBeVisible();
+  await expect(other.locator('.file-row')).toHaveCount(0);
+});

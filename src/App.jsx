@@ -10,6 +10,7 @@ import { convert, cancelAll } from './lib/converter.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { Auto, Close as CloseIcon, Code, Logo, Moon, Shield, Sun } from './components/Icons.jsx';
 import { useTheme } from './lib/theme.js';
+import { restoreSession, saveFiles, saveSelected } from './lib/session.js';
 
 const REPO_URL = 'https://github.com/bli-blu-bla/stl-to-svg';
 const MAX_FILES = 5;
@@ -76,6 +77,9 @@ export default function App() {
   const nextId = useRef(1);
   const nextUpload = useRef(1);
   const nextCutId = useRef(1);
+  // Whether this tab's saved files are back; nothing is saved before, so an
+  // early empty list can't overwrite them.
+  const [restored, setRestored] = useState(false);
   // Guards the auto-centering of the offset so it only runs on a genuinely new
   // plane/model, not on every user drag of the slider.
   const offsetKey = useRef(null);
@@ -160,6 +164,32 @@ export default function App() {
     const firstUsable = loaded.find((f) => !f.error);
     if (firstUsable) setSelectedId((prev) => prev ?? firstUsable.id);
   }, [files]);
+
+  // Bring back the files this tab had open before a reload. They get fresh
+  // ids, in case files were dropped in while they were still loading.
+  useEffect(() => {
+    let alive = true;
+    restoreSession().then(({ files: saved, selectedId: savedSelected }) => {
+      if (!alive) return;
+      const ids = new Map();
+      const uploads = new Map();
+      const back = saved.map((f) => {
+        if (!uploads.has(f.upload)) uploads.set(f.upload, nextUpload.current++);
+        const id = nextId.current++;
+        ids.set(f.id, id);
+        return { ...f, id, upload: uploads.get(f.upload) };
+      });
+      if (back.length) {
+        setFiles((prev) => [...back, ...prev]);
+        setSelectedId((prev) => prev ?? ids.get(savedSelected) ?? back.find((f) => !f.error)?.id ?? null);
+      }
+      setRestored(true);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => { if (restored) saveFiles(files); }, [restored, files]);
+  useEffect(() => { if (restored) saveSelected(selectedId); }, [restored, selectedId]);
 
   // Cuts outlive their file: removing an STL to make room keeps its results.
   const removeFile = useCallback((id) => {
@@ -337,7 +367,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="wrap" id="top">
+      <main className="wrap" id="top" data-restored={restored || undefined}>
         <div className="intro">
           <div>
             <p className="eyebrow">3D mesh → 2D cut path</p>

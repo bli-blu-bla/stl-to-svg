@@ -19,14 +19,18 @@ const STEPS = {
   angle: ['Click the vertex', 'Click a point on the first leg', 'Click a point on the second leg'],
 };
 
-export default function Measure({ items, activeId, onSelect, onClose }) {
+// Measurement ids stay unique across openings of the view.
+let nextMeasureId = 1;
+
+// `store` (measurements per cut) and `prefs` (tool, 45° lock) are owned by
+// the parent, so closing and reopening the view loses neither.
+export default function Measure({ items, activeId, onSelect, onClose, store, setStore, prefs, setPrefs }) {
   const active = items.find((i) => i.id === activeId) || null;
   const svgText = active?.svg || null;
   const geom = useMemo(() => (svgText ? parseSVG(svgText) : null), [svgText]);
   const unit = geom?.unit || 'mm';
 
   // Measurements per file, discarded when that file's SVG is regenerated.
-  const [store, setStore] = useState({});
   const entry = store[activeId];
   const list = entry && entry.svg === svgText ? entry.list : [];
   const setList = useCallback((fn) => {
@@ -35,10 +39,11 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
       const base = cur && cur.svg === svgText ? cur.list : [];
       return { ...prev, [activeId]: { svg: svgText, list: fn(base) } };
     });
-  }, [activeId, svgText]);
+  }, [activeId, svgText, setStore]);
 
-  const [tool, setTool] = useState('distance');
-  const [lock45, setLock45] = useState(false);
+  const { tool, lock45 } = prefs;
+  const setTool = useCallback((t) => setPrefs((p) => ({ ...p, tool: t })), [setPrefs]);
+  const setLock45 = useCallback((fn) => setPrefs((p) => ({ ...p, lock45: fn(p.lock45) })), [setPrefs]);
   const [pts, setPts] = useState([]); // Points placed for the measurement in progress.
   const [hover, setHover] = useState(null);
   const [highlight, setHighlight] = useState(null);
@@ -50,7 +55,6 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
   const lastPointer = useRef(null);
   const lastEsc = useRef(0);
   const [escArmed, setEscArmed] = useState(false);
-  const nextId = useRef(1);
 
   // Fit the drawing whenever another SVG is shown.
   const fit = useCallback(() => { if (geom) setView(fitView(geom)); }, [geom]);
@@ -193,7 +197,7 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
     if (next.length < NEEDS[tool]) {
       setPts(next);
     } else {
-      setList((l) => [...l, { id: nextId.current++, type: tool, pts: next }]);
+      setList((l) => [...l, { id: nextMeasureId++, type: tool, pts: next }]);
       setPts([]);
     }
   };

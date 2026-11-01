@@ -62,6 +62,9 @@ export default function App() {
   const [resetKey, setResetKey] = useState(0);
   const [notice, setNotice] = useState(null);
   const [measureId, setMeasureId] = useState(null);
+  // Kept here rather than in the measuring view, so closing it loses nothing.
+  const [measurements, setMeasurements] = useState({});
+  const [measurePrefs, setMeasurePrefs] = useState({ tool: 'distance', lock45: false });
   const nextId = useRef(1);
   const nextCutId = useRef(1);
   // Guards the auto-centering of the offset so it only runs on a genuinely new
@@ -249,6 +252,15 @@ export default function App() {
     .map((c) => ({ id: c.id, name: c.name, label: c.label, svg: c.svg, url: c.url }));
   const closeMeasure = useCallback(() => setMeasureId(null), []);
 
+  // Forget the measurements of cuts that no longer exist.
+  useEffect(() => {
+    setMeasurements((prev) => {
+      const ids = new Set(cuts.map((c) => String(c.id)));
+      const kept = Object.entries(prev).filter(([id]) => ids.has(id));
+      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+    });
+  }, [cuts]);
+
   // Leave the measuring view once its cut is gone.
   useEffect(() => {
     if (measureId !== null && !cuts.some((c) => c.id === measureId)) setMeasureId(null);
@@ -400,7 +412,10 @@ export default function App() {
 
       {measureId !== null && (
         <ErrorBoundary title="The measuring view stopped working.">
-          <Measure items={measurable} activeId={measureId} onSelect={setMeasureId} onClose={closeMeasure} />
+          <Measure
+            items={measurable} activeId={measureId} onSelect={setMeasureId} onClose={closeMeasure}
+            store={measurements} setStore={setMeasurements} prefs={measurePrefs} setPrefs={setMeasurePrefs}
+          />
         </ErrorBoundary>
       )}
 

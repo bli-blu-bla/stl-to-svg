@@ -297,3 +297,35 @@ test('points line up with the height of a corner', async ({ page }) => {
   await expect(li).toContainText('20.00 mm');
   await expect(li).toContainText('Δx 0.00 mm');
 });
+
+test('measurements survive closing and reopening the measuring view', async ({ page }) => {
+  await upload(page, CUBE_ASCII);
+  await convert(page);
+  const open = () => page.getByRole('button', { name: 'Measure' }).click();
+  const view = page.getByRole('dialog', { name: 'Measure SVG' });
+
+  await open();
+  await view.getByRole('radio', { name: 'Angle' }).click();
+  await view.getByRole('button', { name: '45° snap' }).click();
+  await view.getByRole('radio', { name: 'Distance' }).click();
+  const c = await view.getByTestId('measure-canvas').boundingBox();
+  await page.mouse.click(c.x + c.width * 0.3, c.y + c.height * 0.5);
+  await page.mouse.click(c.x + c.width * 0.6, c.y + c.height * 0.5);
+  await expect(view.locator('.measure-list li')).toHaveCount(1);
+  const text = await view.locator('.measure-list li').first().textContent();
+
+  await view.getByRole('button', { name: 'Close' }).click();
+  await expect(view).toBeHidden();
+  await open();
+  await expect(view.locator('.measure-list li')).toHaveCount(1);
+  await expect(view.locator('.measure-list li').first()).toHaveText(text);
+  // The 45° lock is remembered too.
+  await expect(view.getByRole('button', { name: '45° snap' })).toHaveAttribute('aria-pressed', 'true');
+
+  // Deleting the cut takes its measurements with it.
+  await view.getByRole('button', { name: 'Close' }).click();
+  await page.getByRole('button', { name: /^Delete cut/ }).click();
+  await convert(page);
+  await open();
+  await expect(view.locator('.measure-list li')).toHaveCount(0);
+});

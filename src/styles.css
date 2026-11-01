@@ -418,6 +418,10 @@ section.block > h2 { font-size: 20px; letter-spacing: -.01em; margin-bottom: 16p
 .m-pill.outline rect { fill: var(--canvas); stroke: var(--c); stroke-width: 1.2px; }
 .m-pill.outline text { fill: var(--c); }
 .m-snap { fill: none; stroke: var(--accent); stroke-width: 1.8px; pointer-events: none; }
+.m-align { pointer-events: none; }
+.m-align line { stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 3 4; }
+.m-align rect { fill: none; stroke: var(--accent); stroke-width: 1.2px; }
+.m-align path { stroke: var(--accent); stroke-width: 1.5px; }
 .m-guide { stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 2 6; opacity: .75; pointer-events: none; }
 
 .measure-status {

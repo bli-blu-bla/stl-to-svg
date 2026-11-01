@@ -268,3 +268,32 @@ test('removing a file keeps the cuts made from it', async ({ page }) => {
   await expect(page.locator('.file-row')).toHaveCount(0);
   await expect(page.locator('.result-card')).toHaveCount(1);
 });
+
+test('points line up with the height of a corner', async ({ page }) => {
+  await upload(page, CUBE_ASCII);
+  await convert(page);
+  await page.getByRole('button', { name: 'Measure' }).click();
+  const view = page.getByRole('dialog', { name: 'Measure SVG' });
+
+  const at = (fx, fy) => page.evaluate(([fx, fy]) => {
+    const r = document.querySelector('[data-testid=measure-canvas] .m-bounds');
+    const m = r.getScreenCTM();
+    const x = +r.getAttribute('x') + fx * +r.getAttribute('width');
+    const y = +r.getAttribute('y') + (1 - fy) * +r.getAttribute('height');
+    return { x: m.a * x + m.e, y: m.d * y + m.f };
+  }, [fx, fy]);
+
+  // Beside the square, a few pixels off the level of its top edge…
+  const top = await at(1.04, 1);
+  await page.mouse.move(top.x, top.y + 4);
+  await expect(view.locator('.measure-status')).toContainText('aligned');
+  await expect(view.locator('.m-align')).toBeVisible();
+  await page.mouse.click(top.x, top.y + 4);
+  // …then near the level of the bottom edge, slightly off the first column.
+  const bottom = await at(1.04, 0);
+  await page.mouse.click(bottom.x + 3, bottom.y - 4);
+
+  const li = view.locator('.measure-list li').first();
+  await expect(li).toContainText('20.00 mm');
+  await expect(li).toContainText('Δx 0.00 mm');
+});

@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  angleAt, formatAngle, formatLength, lineAngle, measureBetween, parseSVG, rayHit, snapAngle, snapPoint,
+  alignPoint, angleAt, formatAngle, formatLength, lineAngle, measureBetween, parseSVG, rayAlign, rayHit, snapAngle, snapPoint,
 } from '../lib/measure.js';
 import { Angle, Back, Distance, Minus, Plus, Snap45 } from './Icons.jsx';
 
 const SNAP_PX = 10;
+const ALIGN_PX = 7; // Tighter than SNAP_PX: tracking should help, not grab.
 const ZOOM_STEP = 1.4;
 const PILL_CHAR_PX = 8.2; // Generous per-glyph width at 12.5 px, so labels never spill out of their pill.
 const DRAG_PX = 4;
@@ -112,19 +113,27 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
 
   // Cursor → snapped drawing point. Every leg is measured from the first
   // point (the start, or the angle's vertex), so that is the 45° anchor.
+  // Priority: a vertex or edge under the cursor, then alignment with the
+  // row/column of a vertex (or of a point already placed), then free.
   const resolve = useCallback((e) => {
     const raw = toDrawing(e);
     if (!raw || !geom) return null;
     const tol = SNAP_PX / ppu;
+    const alignTol = ALIGN_PX / ppu;
     const anchor = pts[0];
     if (anchor && lock45 !== e.shiftKey) {
       const locked = snapAngle(anchor, raw);
       if (locked.dir) {
-        const hit = !e.altKey && rayHit(geom, anchor, locked.dir, locked, tol);
-        return { ...(hit || locked), locked: true };
+        const hit = !e.altKey && (
+          rayHit(geom, anchor, locked.dir, locked, tol)
+          || rayAlign(geom, anchor, locked.dir, locked, alignTol, pts));
+        return { ...(hit || locked), dir: locked.dir, locked: true };
       }
     }
-    return (!e.altKey && snapPoint(geom, raw.x, raw.y, tol)) || { ...raw, kind: null };
+    if (e.altKey) return { ...raw, kind: null };
+    return snapPoint(geom, raw.x, raw.y, tol)
+      || alignPoint(geom, raw.x, raw.y, alignTol, pts)
+      || { ...raw, kind: null };
   }, [toDrawing, geom, ppu, pts, lock45]);
 
   // Zoom around the cursor. Registered by hand: React's wheel listener is passive.
@@ -337,6 +346,20 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
               {hover && hover.kind === 'edge' && (
                 <circle cx={hover.x} cy={hover.y} r={px(6)} className="m-snap" vectorEffect="non-scaling-stroke" />
               )}
+              {hover && hover.kind === 'align' && (
+                <g className="m-align">
+                  {hover.guides.map((g, i) => (
+                    <g key={i}>
+                      <line x1={g.x} y1={g.y} x2={hover.x} y2={hover.y} vectorEffect="non-scaling-stroke" />
+                      <rect x={g.x - px(3.5)} y={g.y - px(3.5)} width={px(7)} height={px(7)} vectorEffect="non-scaling-stroke" />
+                    </g>
+                  ))}
+                  <path
+                    d={`M ${hover.x - px(6)} ${hover.y} H ${hover.x + px(6)} M ${hover.x} ${hover.y - px(6)} V ${hover.y + px(6)}`}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </g>
+              )}
             </svg>
           ) : (
             <div className="measure-empty">
@@ -349,7 +372,7 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
             {hover && b && (
               <span className="coords">
                 x {formatLength(hover.x - b.minX, unit).split(' ')[0]}  y {formatLength(b.maxY - hover.y, unit)}
-                {hover.kind ? ` · on ${hover.kind}` : ''}
+                {hover.kind === 'align' ? ' · aligned' : hover.kind ? ` · on ${hover.kind}` : ''}
                 {hover.locked ? ' · 45° lock' : ''}
               </span>
             )}

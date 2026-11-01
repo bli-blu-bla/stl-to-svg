@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSVG } from '../src/lib/svg.js';
 import {
-  angleAt, formatAngle, formatLength, lineAngle, measureBetween, parsePathData, parseSVG, rayHit, snapAngle, snapPoint,
+  alignPoint, angleAt, formatAngle, formatLength, lineAngle, measureBetween, parsePathData, parseSVG, rayAlign, rayHit, snapAngle, snapPoint,
 } from '../src/lib/measure.js';
 
 const square = (s) => ({ closed: true, points: [[0, 0], [s, 0], [s, s], [0, s]] });
@@ -86,4 +86,30 @@ test('measures angles and line directions', () => {
   close(lineAngle({ x: 0, y: 0 }, { x: 1, y: 1 }), 135);
   assert.equal(lineAngle({ x: 5, y: 0 }, { x: 0, y: 0 }), 0);
   assert.equal(formatAngle(89.96), '90.0°');
+});
+
+test('aligns to the row or column of a nearby vertex', () => {
+  const g = parseSVG(buildSVG([square(10)], { strokeWidth: 0 }));
+  // Level with the top edge's corners, out to the right.
+  const row = alignPoint(g, 15, 10.3, 0.5);
+  assert.equal(row.kind, 'align');
+  assert.deepEqual([row.x, row.y], [15, 10]);
+  assert.deepEqual(row.guides, [{ x: 10, y: 10 }], 'guide drawn from the nearest corner on that row');
+  // Below the right edge, in line with it.
+  const col = alignPoint(g, 10.2, 14, 0.5);
+  assert.deepEqual([col.x, col.y], [10, 14]);
+  // In line with two different corners at once: lands on the crossing.
+  const both = alignPoint(g, 10.3, -4, 0.5, [{ x: 30, y: -4.2 }]);
+  assert.deepEqual([both.x, both.y], [10, -4.2]);
+  assert.equal(both.guides.length, 2);
+  assert.equal(alignPoint(g, 15, 15, 0.5), null);
+});
+
+test('a locked ray stops level with a vertex', () => {
+  const g = parseSVG(buildSVG([square(10)], { strokeWidth: 0 }));
+  // Straight down from (15, -5): crosses the rows y = 0 and y = 10.
+  const hit = rayAlign(g, { x: 15, y: -5 }, [0, 1], { x: 15, y: 9.7 }, 0.5);
+  assert.deepEqual([hit.x, hit.y], [15, 10]);
+  assert.equal(hit.kind, 'align');
+  assert.equal(rayAlign(g, { x: 15, y: -5 }, [0, 1], { x: 15, y: 5 }, 0.5), null);
 });

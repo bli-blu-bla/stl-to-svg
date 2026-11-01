@@ -165,3 +165,53 @@ export function lineAngle(a, b) {
 }
 
 export const formatAngle = (deg) => `${deg.toFixed(1)}°`;
+
+// Alignment ("tracking") candidates: every outline vertex plus any extra
+// points, e.g. those already placed for the measurement in progress.
+function* alignTargets(geom, extra) {
+  const v = geom.vertices;
+  for (let i = 0; i < v.length; i += 2) yield [v[i], v[i + 1]];
+  for (const p of extra || []) yield [p.x, p.y];
+}
+
+// Snap `x` to the column and/or `y` to the row of a nearby vertex, within
+// `tol`. Ties between vertices on the same line go to the one closest to the
+// cursor, which is where the guide is drawn from. Returns null when nothing
+// lines up.
+export function alignPoint(geom, x, y, tol, extra) {
+  let col = null; let colD = tol; let colR = Infinity;
+  let row = null; let rowD = tol; let rowR = Infinity;
+  for (const [vx, vy] of alignTargets(geom, extra)) {
+    const r = Math.hypot(vx - x, vy - y);
+    const dx = Math.abs(vx - x);
+    if (dx < colD - 1e-12 || (dx <= colD + 1e-12 && r < colR)) { colD = dx; colR = r; col = { x: vx, y: vy }; }
+    const dy = Math.abs(vy - y);
+    if (dy < rowD - 1e-12 || (dy <= rowD + 1e-12 && r < rowR)) { rowD = dy; rowR = r; row = { x: vx, y: vy }; }
+  }
+  if (!col && !row) return null;
+  return {
+    x: col ? col.x : x,
+    y: row ? row.y : y,
+    kind: 'align',
+    guides: [col, row].filter(Boolean),
+  };
+}
+
+// Along a locked ray from `a`, stop where it crosses the row or column of a
+// vertex, if that crossing is within `tol` of `p`.
+export function rayAlign(geom, a, dir, p, tol, extra) {
+  const [ux, uy] = dir;
+  let best = null;
+  let bestD = tol;
+  const consider = (t, ref) => {
+    if (!(t > 1e-9)) return;
+    const x = a.x + ux * t; const y = a.y + uy * t;
+    const d = Math.hypot(x - p.x, y - p.y);
+    if (d < bestD) { bestD = d; best = { x, y, kind: 'align', guides: [ref], dir }; }
+  };
+  for (const [vx, vy] of alignTargets(geom, extra)) {
+    if (Math.abs(uy) > 1e-12) consider((vy - a.y) / uy, { x: vx, y: vy });
+    if (Math.abs(ux) > 1e-12) consider((vx - a.x) / ux, { x: vx, y: vy });
+  }
+  return best;
+}

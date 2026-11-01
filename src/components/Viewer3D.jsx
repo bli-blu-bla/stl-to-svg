@@ -150,6 +150,8 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey, theme = 
     ctx.center = sphere.center.clone();
     ctx.gridScale = Math.max(ctx.radius / 25, 0.02);
     ctx.grid?.scale.setScalar(ctx.gridScale);
+    // Keep the floor grid under the model, wherever its file put it.
+    ctx.grid?.position.set(ctx.center.x, ctx.center.y, 0);
     frame(ctx);
   }, [mesh]);
 
@@ -176,6 +178,7 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey, theme = 
     const grid = new THREE.GridHelper(100, 20, pal.gridCenter, pal.grid);
     grid.rotation.x = Math.PI / 2; // model space is Z-up, like STL
     grid.scale.setScalar(ctx.gridScale);
+    if (ctx.center) grid.position.set(ctx.center.x, ctx.center.y, 0);
     ctx.scene.add(grid);
     ctx.grid = grid;
   }, [theme]);
@@ -197,7 +200,9 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey, theme = 
     ctx.planeMesh.scale.set(size, size, 1);
     // PlaneGeometry faces +Z, so rotate that onto the plane normal.
     ctx.planeMesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    // Centre the plane widget on the model, not on the world origin.
     ctx.planeMesh.position.copy(n).multiplyScalar(offset);
+    if (ctx.center) ctx.planeMesh.position.add(ctx.center.clone().projectOnPlane(n));
 
     // For projection the plane is a viewing surface: show which way we look.
     // The viewer sits on the side of u × v, which keeps the 2D drawing
@@ -208,7 +213,7 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey, theme = 
     ctx.arrow.position.copy(start);
     ctx.arrow.setDirection(eye.clone().negate());
     ctx.arrow.setLength(ctx.radius * 1.1, ctx.radius * 0.22, ctx.radius * 0.12);
-  }, [basis, offset, mode, theme]);
+  }, [basis, offset, mode, theme, mesh]);
 
   return (
     <div className="viewer-canvas" ref={hostRef}>

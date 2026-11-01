@@ -1,12 +1,13 @@
 import React, { useRef, useState } from 'react';
 import { Upload } from './Icons.jsx';
+import { MODEL_EXTENSIONS } from '../lib/model.js';
 
 export default function Dropzone({ onFiles, maxFiles }) {
   const inputRef = useRef(null);
   const [over, setOver] = useState(false);
 
   const pick = (list) => {
-    const files = Array.from(list).filter((f) => /\.stl$/i.test(f.name));
+    const files = Array.from(list).filter((f) => MODEL_EXTENSIONS.test(f.name));
     if (files.length) onFiles(files);
   };
 
@@ -22,12 +23,12 @@ export default function Dropzone({ onFiles, maxFiles }) {
       onDrop={(e) => { e.preventDefault(); setOver(false); pick(e.dataTransfer.files); }}
     >
       <Upload />
-      <strong>Drop STL files or browse</strong>
-      <span className="hint">Binary or ASCII · up to {maxFiles} files · 100 MB each</span>
+      <strong>Drop STL or 3MF files or browse</strong>
+      <span className="hint">STL (binary or ASCII) or 3MF · up to {maxFiles} files · 100 MB each</span>
       <input
         ref={inputRef}
         type="file"
-        accept=".stl,model/stl"
+        accept=".stl,.3mf,model/stl,model/3mf"
         multiple
         className="sr-only"
         onChange={(e) => { pick(e.target.files); e.target.value = ''; }}

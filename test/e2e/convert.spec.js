@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { box, cube, torus, encodeBinarySTL, encodeAsciiSTL } from '../fixtures.mjs';
+import { box, cube, torus, encodeBinarySTL, encodeAsciiSTL, encode3MF, modelXML } from '../fixtures.mjs';
 
 // Fixtures are written to a temp dir at run time — no binaries in the repo.
 const dir = mkdtempSync(join(tmpdir(), 'stl-e2e-'));
@@ -16,6 +16,20 @@ const TORUS = write('torus.stl', encodeBinarySTL(torus()));
 const TALL = write('tall.stl', encodeBinarySTL(cube(10).map((t) => t.map(([x, y, z]) => [x, y * 3, z]))));
 // A plate with a boss on top: its top view has an inner step the outline hides.
 const STEPPED = write('stepped.stl', encodeBinarySTL([...box(-10, -10, 0, 10, 10, 5), ...box(-5, -5, 5, 5, 5, 10)]));
+// A 3MF in the Bambu / Prusa layout: the mesh lives in a separate model file,
+// placed by a component, in centimetres.
+const CUBE_3MF = write('cube.3mf', encode3MF(
+  { unit: 'centimeter', objects: { 1: { components: [{ objectid: 2, path: '/3D/Objects/object_1.model' }] } }, items: [{ objectid: 1 }] },
+  { '3D/Objects/object_1.model': modelXML({ unit: 'centimeter', objects: { 2: cube(1) } }) },
+));
+// A build plate with two named objects far from the origin.
+const PLATE_3MF = write('plate.3mf', encode3MF({
+  objects: {
+    1: { name: 'Lid', mesh: box(100, 100, 0, 120, 110, 4) },
+    2: { name: 'Base', mesh: box(150, 90, 0, 160, 130, 12) },
+  },
+  items: [{ objectid: 1 }, { objectid: 2 }],
+}));
 const CUBE_ASCII = write('cube.stl', new TextEncoder().encode(encodeAsciiSTL(cube(10))).buffer);
 
 // "Convert to SVG" for one file, "Convert 2 files" for a batch, "Converting…" while busy.
@@ -113,10 +127,18 @@ test('changing output units changes the SVG dimensions', async ({ page }) => {
   expect(await read()).toContain('in"');
 });
 
-test('converts a batch of files and offers every result for download', async ({ page }) => {
+test('converts only the selected file; others when picked', async ({ page }) => {
   await upload(page, TORUS, CUBE_ASCII);
+  await expect(page.locator('.convert-target')).toContainText('torus.stl');
+  await convert(page);
+  await expect(page.locator('.result-card')).toHaveCount(1);
+  await expect(page.locator('.result-card .name')).toHaveText('torus.stl');
+
+  await page.locator('.file-row', { hasText: 'cube.stl' }).locator('.pick').click();
+  await expect(page.locator('.convert-target')).toContainText('cube.stl');
   await convert(page);
   await expect(page.locator('.result-card')).toHaveCount(2);
+  await expect(page.locator('.result-card .name').first()).toHaveText('cube.stl');
   for (const card of await page.locator('.result-card').all()) {
     await expect(card.locator('.stats')).toContainText(/\d+ path/);
     await expect(card.getByRole('button', { name: 'Download SVG' })).toBeEnabled();
@@ -143,7 +165,9 @@ test('removing a file clears it from the workspace', async ({ page }) => {
 test('measuring view measures, switches between SVGs and closes', async ({ page }) => {
   await upload(page, CUBE_ASCII, TORUS);
   await convert(page);
-  await page.locator('.result-card').first().getByRole('button', { name: 'Measure' }).click();
+  await page.locator('.file-row', { hasText: 'torus.stl' }).locator('.pick').click();
+  await convert(page);
+  await page.locator('.result-card', { hasText: 'cube.stl' }).getByRole('button', { name: 'Measure' }).click();
 
   const view = page.getByRole('dialog', { name: 'Measure SVG' });
   await expect(view).toBeVisible();
@@ -346,4 +370,40 @@ test('all-edges projection draws steps the outline leaves out', async ({ page })
   await expect(card.locator('.stats')).toContainText('2 paths');
   // Both views are kept side by side.
   await expect(page.locator('.result-card')).toHaveCount(2);
+});
+
+test('reads 3MF files and converts them like STL', async ({ page }) => {
+  await upload(page, CUBE_3MF);
+  await expect(page.locator('.file-row').first()).toContainText('12 tri · 20.0 × 20.0 × 20.0 mm');
+  await convert(page);
+  await expect(page.locator('.result-card .dims')).toHaveText('20.00 × 20.00 mm');
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.getByRole('button', { name: 'Download SVG' }).click(),
+  ]);
+  expect(dl.suggestedFilename()).toMatch(/^cube-section-XY-.*\.svg$/);
+});
+
+test('a 3MF with several objects lists them separately, centred', async ({ page }) => {
+  await upload(page, PLATE_3MF);
+  const rows = page.locator('.file-row');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('.name')).toHaveText('Lid');
+  await expect(rows.nth(1).locator('.name')).toHaveText('Base');
+  await expect(rows.nth(1)).toContainText('from plate.3mf');
+  await expect(rows.nth(1)).toContainText('10.0 × 40.0 × 12.0 mm');
+  await expect(page.locator('.note')).toContainText('plate.3mf holds 2 objects');
+
+  // Only the picked object is converted.
+  await rows.nth(1).locator('.pick').click();
+  await page.getByLabel('Plane offset value').fill('6');
+  await convert(page);
+  await expect(page.locator('.result-card')).toHaveCount(1);
+  await expect(page.locator('.result-card .name')).toHaveText('Base');
+  await expect(page.locator('.result-card .dims')).toHaveText('10.00 × 40.00 mm');
+
+  // The two objects count as one uploaded file towards the limit of five.
+  await page.setInputFiles('input[type=file]', [TORUS, CUBE_ASCII, TALL, STEPPED]);
+  await expect(rows).toHaveCount(6);
+  await expect(page.locator('.note.error')).toHaveCount(0);
 });

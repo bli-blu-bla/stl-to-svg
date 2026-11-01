@@ -4,7 +4,7 @@ import Settings from './components/Settings.jsx';
 import Viewer3D from './components/Viewer3D.jsx';
 import Results from './components/Results.jsx';
 import Measure from './components/Measure.jsx';
-import { parseSTL } from './lib/stl.js';
+import { MODEL_EXTENSIONS, parseModelObjects } from './lib/model.js';
 import { basisFor, boundsOf, normalFromAngles, offsetRange } from './lib/plane.js';
 import { convert, cancelAll } from './lib/converter.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -74,6 +74,7 @@ export default function App() {
   const [measurements, setMeasurements] = useState({});
   const [measurePrefs, setMeasurePrefs] = useState({ tool: 'distance', lock45: false });
   const nextId = useRef(1);
+  const nextUpload = useRef(1);
   const nextCutId = useRef(1);
   // Guards the auto-centering of the offset so it only runs on a genuinely new
   // plane/model, not on every user drag of the slider.
@@ -104,7 +105,8 @@ export default function App() {
 
   const addFiles = useCallback(async (incoming) => {
     setNotice(null);
-    const room = MAX_FILES - files.length;
+    // The limit is on uploaded files: a 3MF counts once, however many objects it holds.
+    const room = MAX_FILES - new Set(files.map((f) => f.upload)).size;
     if (room <= 0) {
       setNotice({ error: true, text: `You can work with at most ${MAX_FILES} files at a time.` });
       return;
@@ -113,20 +115,38 @@ export default function App() {
       setNotice({ error: true, text: `Only the first ${room} file(s) were added — the limit is ${MAX_FILES}.` });
     }
 
-    const loaded = await Promise.all(incoming.slice(0, room).map(async (file) => {
-      const entry = { id: nextId.current++, name: file.name, size: file.size };
+    // Each file becomes one entry per object: one for an STL, one for every
+    // object on a 3MF's build plate (`source` then names the file it came from).
+    const loaded = (await Promise.all(incoming.slice(0, room).map(async (file) => {
+      const upload = nextUpload.current++;
+      const failed = (error) => [{ id: nextId.current++, upload, name: file.name, size: file.size, error }];
       if (file.size > MAX_FILE_BYTES) {
-        return { ...entry, error: `Too large (${(file.size / 1048576).toFixed(0)} MB). The limit is ${MAX_FILE_BYTES / 1048576} MB.` };
+        return failed(`Too large (${(file.size / 1048576).toFixed(0)} MB). The limit is ${MAX_FILE_BYTES / 1048576} MB.`);
       }
       try {
-        const positions = parseSTL(await file.arrayBuffer());
-        return { ...entry, positions, bounds: boundsOf(positions), triangles: positions.length / 9 };
+        const objects = await parseModelObjects(await file.arrayBuffer(), file.name);
+        return objects.map((o) => ({
+          id: nextId.current++,
+          upload,
+          name: o.name,
+          source: objects.length > 1 ? file.name : null,
+          size: file.size,
+          positions: o.positions,
+          bounds: boundsOf(o.positions),
+          triangles: o.positions.length / 9,
+        }));
       } catch (err) {
-        return { ...entry, error: err?.message || 'Could not read this STL file.' };
+        return failed(err?.message || 'Could not read this file.');
       }
-    }));
+    }))).flat();
 
-    const heavy = loaded.filter((f) => !f.error && f.size > LARGE_FILE_BYTES);
+    const split = new Map();
+    for (const f of loaded) if (f.source) split.set(f.upload, [...(split.get(f.upload) || []), f]);
+    if (split.size) {
+      setNotice({ text: [...split.values()].map((g) => `${g[0].source} holds ${g.length} objects`).join(' · ') + ' — each is listed separately; select one to convert it.' });
+    }
+
+    const heavy = [...new Set(loaded.filter((f) => !f.error && f.size > LARGE_FILE_BYTES).map((f) => f.upload))];
     if (heavy.length && !incoming.some((f) => f.size > MAX_FILE_BYTES)) {
       setNotice({ text: `${heavy.length === 1 ? 'That file is' : 'Those files are'} large — conversion may take a few seconds and use a lot of memory.` });
     }
@@ -134,7 +154,7 @@ export default function App() {
     setFiles((prev) => [...prev, ...loaded]);
     const firstUsable = loaded.find((f) => !f.error);
     if (firstUsable) setSelectedId((prev) => prev ?? firstUsable.id);
-  }, [files.length]);
+  }, [files]);
 
   // Cuts outlive their file: removing an STL to make room keeps its results.
   const removeFile = useCallback((id) => {
@@ -163,13 +183,15 @@ export default function App() {
     setSelectedId(files.find((f) => !f.error)?.id ?? null);
   }, [files, selectedId]);
 
+  // Only the selected file is converted: the offset, plane and preview all
+  // refer to it, so applying them to every loaded file would be a guess.
   const runConversion = useCallback(async () => {
-    const usable = files.filter((f) => !f.error);
+    const usable = selected && !selected.error ? [selected] : [];
     if (!usable.length) return;
     setBusy(true);
     setNotice(null);
 
-    // New cuts go to the front, in file order. Re-running identical settings
+    // New cuts go to the front. Re-running identical settings
     // on a file replaces that cut instead of stacking duplicates.
     const { label: cutLabel, slug } = describeCut(s);
     const batch = usable.map((f) => ({
@@ -225,7 +247,7 @@ export default function App() {
     }
     setBusy(false);
     setProgress(null);
-  }, [files, s]);
+  }, [selected, s]);
 
   const cancel = useCallback(() => {
     cancelAll();
@@ -239,7 +261,7 @@ export default function App() {
     if (!cut?.svg) return;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([cut.svg], { type: 'image/svg+xml' }));
-    a.download = `${cut.name.replace(/\.stl$/i, '')}-${cut.slug}.svg`;
+    a.download = `${cut.name.replace(MODEL_EXTENSIONS, '')}-${cut.slug}.svg`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }, []);
@@ -275,7 +297,7 @@ export default function App() {
   useEffect(() => {
     if (measureId !== null && !cuts.some((c) => c.id === measureId)) setMeasureId(null);
   }, [cuts, measureId]);
-  const usableCount = files.filter((f) => !f.error).length;
+  const canConvert = !!selected && !selected.error;
 
   const theme = useTheme();
   const themeLabel = { auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.pref];
@@ -316,7 +338,7 @@ export default function App() {
             <p className="eyebrow">3D mesh → 2D cut path</p>
             <h1>STL to SVG converter</h1>
           </div>
-          <p>Slice or project a 3D model onto a plane and get clean SVG outlines for laser cutting, CNC routing and templates.</p>
+          <p>Slice or project an STL or 3MF model onto a plane and get clean SVG outlines for laser cutting, CNC routing and templates.</p>
         </div>
 
         <div className="workspace">
@@ -334,6 +356,7 @@ export default function App() {
                       onClick={() => !f.error && setSelectedId(f.id)}
                     >
                       <div className="name">{f.name}</div>
+                      {f.source && <div className="source" title={f.source}>from {f.source}</div>}
                       {f.error
                         ? <div className="err">{f.error}</div>
                         : <div className="meta">{f.triangles.toLocaleString('en-US')} tri · {f.bounds.size.map((v) => v.toFixed(1)).join(' × ')} mm</div>}
@@ -368,13 +391,21 @@ export default function App() {
 
           <Settings s={s} set={set} range={range} disabled={!selected}>
             <div className="actions">
-              <button className="btn accent big" disabled={!usableCount || busy} onClick={runConversion}>
-                {busy ? 'Converting…' : usableCount > 1 ? `Convert ${usableCount} files` : 'Convert to SVG'}
+              <button
+                className="btn accent big"
+                disabled={!canConvert || busy}
+                onClick={runConversion}
+                title={canConvert ? `Convert ${selected.name}` : 'Select a file to convert'}
+              >
+                {busy ? 'Converting…' : 'Convert to SVG'}
               </button>
               {busy
                 ? <button className="btn big" onClick={cancel}>Cancel</button>
                 : <button className="btn big" disabled={!anySvg} onClick={downloadAll}>Download all</button>}
             </div>
+            {files.length > 1 && canConvert && (
+              <span className="field-hint convert-target">Converts the selected file: <strong>{selected.name}</strong></span>
+            )}
             {progress && (
               <div className="progress" role="status" aria-live="polite">
                 <div className="progress-label">
@@ -399,7 +430,7 @@ export default function App() {
             <div className="panel">
               <h3><span className="swatch" style={{ background: 'var(--accent)' }} />Intersection — a cross-section</h3>
               <ol>
-                <li><strong>Upload your STL</strong> by dropping it in or browsing.</li>
+                <li><strong>Upload your STL or 3MF</strong> by dropping it in or browsing.</li>
                 <li><strong>Pick Intersection</strong> and a cutting plane: XY, XZ, YZ or a custom angle.</li>
                 <li><strong>Move the offset</strong> until the orange plane sits where you want the cut.</li>
                 <li><strong>Convert</strong> — every edge where the plane meets the geometry becomes a path.</li>
@@ -410,7 +441,7 @@ export default function App() {
             <div className="panel">
               <h3><span className="swatch" style={{ background: 'var(--measure)' }} />Projection — a silhouette</h3>
               <ol>
-                <li><strong>Upload your STL.</strong></li>
+                <li><strong>Upload your STL or 3MF.</strong></li>
                 <li><strong>Pick Projection</strong> and the plane you look through.</li>
                 <li><strong>Set resolution and stroke width</strong> for your cutter.</li>
                 <li><strong>Convert</strong> — the SVG holds the model’s outline, holes included.</li>

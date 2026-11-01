@@ -9,94 +9,97 @@ const RESOLUTIONS = [
   { value: 1, label: 'Low (1.0 mm)' },
 ];
 
-export default function Settings({ s, set, range, disabled }) {
-  const custom = s.planeKey === 'custom';
+const PLANES = [
+  { key: 'XY', label: 'XY', hint: 'XY — top view' },
+  { key: 'XZ', label: 'XZ', hint: 'XZ — front view' },
+  { key: 'YZ', label: 'YZ', hint: 'YZ — side view' },
+  { key: 'custom', label: 'Custom', hint: 'Custom — rotate and tilt the plane freely' },
+];
+
+// The conversion form. `children` renders below it (the convert actions).
+export default function Settings({ s, set, range, disabled, children }) {
+  const intersection = s.mode === 'intersection';
   const span = range.max - range.min;
   const step = span > 0 ? span / 1000 : 0.01;
+  const plane = PLANES.find((p) => p.key === s.planeKey) || PLANES[0];
 
   return (
-    <div className="panel">
-      <h3>Conversion Settings</h3>
+    <section className="panel settings" aria-label="Conversion settings">
+      <h2 className="panel-title">Settings</h2>
 
-      <div className="tabs" role="tablist">
-        <button
-          role="tab"
-          aria-selected={s.mode === 'intersection'}
-          className={s.mode === 'intersection' ? 'active' : ''}
-          onClick={() => set({ mode: 'intersection' })}
-        >
-          Intersection Outline
-        </button>
-        <button
-          role="tab"
-          aria-selected={s.mode === 'projection'}
-          className={s.mode === 'projection' ? 'active' : ''}
-          onClick={() => set({ mode: 'projection' })}
-        >
-          Projection Outline
-        </button>
+      <div className="seg" role="radiogroup" aria-label="Mode">
+        {[['intersection', 'Intersection'], ['projection', 'Projection']].map(([mode, label]) => (
+          <button
+            key={mode}
+            role="radio"
+            aria-checked={s.mode === mode}
+            onClick={() => set({ mode })}
+            title={mode === 'intersection' ? 'Slice the model where the plane cuts it' : 'Trace the silhouette seen through the plane'}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      <div className="field-row">
-        <div className="field">
-          <label htmlFor="unit">Output Units</label>
-          <select id="unit" value={s.unit} onChange={(e) => set({ unit: e.target.value })}>
-            {Object.entries(UNITS).map(([k, u]) => <option key={k} value={k}>{u.label}</option>)}
-          </select>
+      <div className="field">
+        <span className="field-label" id="plane-label">{intersection ? 'Cutting plane' : 'Viewing plane'}</span>
+        <div className="chips" role="group" aria-labelledby="plane-label">
+          {PLANES.map((p) => (
+            <button
+              key={p.key}
+              aria-pressed={s.planeKey === p.key}
+              title={p.hint}
+              onClick={() => set({ planeKey: p.key })}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
-        <div className="field">
-          <label htmlFor="plane">{s.mode === 'intersection' ? 'Cutting Plane' : 'Viewing Plane'}</label>
-          <select id="plane" value={s.planeKey} onChange={(e) => set({ planeKey: e.target.value })}>
-            <option value="XY">XY Plane (top view)</option>
-            <option value="XZ">XZ Plane (front view)</option>
-            <option value="YZ">YZ Plane (side view)</option>
-            <option value="custom">Custom Plane…</option>
-          </select>
-        </div>
+        <span className="field-hint">{plane.hint}</span>
       </div>
 
-      {custom && (
-        <div className="field-row">
+      {s.planeKey === 'custom' && (
+        <div className="grid-2">
           <div className="field">
-            <label htmlFor="yaw">Rotation around Z: {s.yaw}°</label>
+            <label htmlFor="yaw">Rotate around Z · <span className="mono">{s.yaw}°</span></label>
             <input id="yaw" type="range" min="0" max="360" step="1"
               value={s.yaw} onChange={(e) => set({ yaw: +e.target.value })} />
           </div>
           <div className="field">
-            <label htmlFor="pitch">Tilt from Z: {s.pitch}°</label>
+            <label htmlFor="pitch">Tilt from Z · <span className="mono">{s.pitch}°</span></label>
             <input id="pitch" type="range" min="0" max="180" step="1"
               value={s.pitch} onChange={(e) => set({ pitch: +e.target.value })} />
           </div>
         </div>
       )}
 
-      {s.mode === 'intersection' && (
+      {intersection && (
         <div className="field">
-          <label htmlFor="offset">Plane Offset</label>
-          <div className="slider-row">
+          <div className="field-head">
+            <label htmlFor="offset">Plane offset</label>
             <input
-              id="offset" type="range"
-              min={range.min} max={range.max} step={step}
-              value={s.offset}
-              disabled={disabled || span <= 0}
-              onChange={(e) => set({ offset: +e.target.value })}
-            />
-            <input
-              type="number" step={0.1} value={round(s.offset)}
+              className="value-input" type="number" step={0.1} value={round(s.offset)}
               disabled={disabled}
               aria-label="Plane offset value"
               onChange={(e) => set({ offset: clamp(+e.target.value, range.min, range.max) })}
             />
           </div>
+          <input
+            id="offset" type="range"
+            min={range.min} max={range.max} step={step}
+            value={s.offset}
+            disabled={disabled || span <= 0}
+            onChange={(e) => set({ offset: +e.target.value })}
+          />
           <div className="range-hint">
             <span>{round(range.min)}</span>
-            <span>model extent along plane normal</span>
+            <span>model extent along the normal</span>
             <span>{round(range.max)}</span>
           </div>
         </div>
       )}
 
-      <div className="field-row">
+      <div className="grid-2">
         <div className="field">
           <label htmlFor="res">Resolution</label>
           <select id="res" value={s.resolution} onChange={(e) => set({ resolution: +e.target.value })}>
@@ -104,40 +107,31 @@ export default function Settings({ s, set, range, disabled }) {
           </select>
         </div>
         <div className="field">
-          <label htmlFor="sw">Stroke Width (mm)</label>
+          <label htmlFor="sw">Stroke width (mm)</label>
           <input id="sw" type="number" min="0.01" max="5" step="0.01"
             value={s.strokeWidth}
             onChange={(e) => set({ strokeWidth: clamp(+e.target.value || 0.1, 0.01, 5) })} />
         </div>
-      </div>
-
-      {s.mode === 'projection' && (
         <div className="field">
-          <label htmlFor="q">Outline Quality</label>
-          <select id="q" value={s.quality} onChange={(e) => set({ quality: e.target.value })}>
-            <option value="auto">Auto (exact, raster above 60k triangles)</option>
-            <option value="exact">Exact — boolean union, crisp edges</option>
-            <option value="raster">Fast — grid sampled, for very large meshes</option>
+          <label htmlFor="unit">Output unit</label>
+          <select id="unit" value={s.unit} onChange={(e) => set({ unit: e.target.value })}>
+            {Object.entries(UNITS).map(([k, u]) => <option key={k} value={k}>{u.label}</option>)}
           </select>
         </div>
-      )}
-
-      <div className="note">
-        {s.mode === 'intersection' ? (
-          <>
-            <strong>Intersection Mode:</strong> slices through your 3D model at a specific plane to
-            create cross-section outlines. Ideal for internal structure patterns, cross-sections, or
-            layered cutting templates.
-          </>
-        ) : (
-          <>
-            <strong>Projection Mode:</strong> flattens the whole model onto the plane and traces the
-            resulting silhouette, holes included. Ideal for templates, stencils, gaskets, and simple
-            cutting patterns.
-          </>
+        {!intersection && (
+          <div className="field">
+            <label htmlFor="q">Quality</label>
+            <select id="q" value={s.quality} onChange={(e) => set({ quality: e.target.value })}>
+              <option value="auto">Auto</option>
+              <option value="exact">Exact — crisp edges</option>
+              <option value="raster">Fast — for huge meshes</option>
+            </select>
+          </div>
         )}
       </div>
-    </div>
+
+      {children}
+    </section>
   );
 }
 

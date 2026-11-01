@@ -1,1 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#4f8cff"/><path d="M8 21 L16 8 L24 21 Z" fill="none" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/><path d="M6 21 h20" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <style>
+    .tile { fill: #16181D; }
+    .mark { stroke: #F4F2EC; }
+    .cut { stroke: #FB923C; }
+    @media (prefers-color-scheme: dark) {
+      .tile { fill: #ECEAE4; }
+      .mark { stroke: #111215; }
+      .cut { stroke: #C2410C; }
+    }
+  </style>
+  <rect class="tile" width="32" height="32" rx="7"/>
+  <path class="mark" d="M8.6 22.2 L16 7.4 L23.4 22.2 Z" fill="none" stroke-width="2.4" stroke-linejoin="round"/>
+  <path class="cut" d="M6.2 25.6 H25.8" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

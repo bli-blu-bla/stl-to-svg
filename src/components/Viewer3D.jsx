@@ -2,9 +2,21 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
+// Scene colours per theme; they mirror the CSS tokens in styles.css.
+const PALETTES = {
+  light: {
+    background: 0xfbfaf6, gridCenter: 0xc9c2b3, grid: 0xe6e1d5, mesh: 0x8c96a6,
+    sky: 0xffffff, ground: 0xb9b3a5, cut: 0xc2410c, view: 0x1d4ed8, planeOpacity: 0.12,
+  },
+  dark: {
+    background: 0x15171a, gridCenter: 0x3a3e46, grid: 0x24272d, mesh: 0x9aa3b2,
+    sky: 0xd6dbe4, ground: 0x1a1c20, cut: 0xfb923c, view: 0x60a5fa, planeOpacity: 0.2,
+  },
+};
+
 // Live 3D preview of the loaded mesh with the cutting/projection plane drawn in
 // place, so the offset slider can be judged before converting.
-export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
+export default function Viewer3D({ mesh, basis, offset, mode, resetKey, theme = 'light' }) {
   const hostRef = useRef(null);
   const ctxRef = useRef(null);
   const [failure, setFailure] = useState(null);
@@ -33,20 +45,22 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
     renderer.domElement.addEventListener('webglcontextlost', onLost);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0e14);
+    scene.background = new THREE.Color();
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 10000);
+    // Model space is Z-up, like STL. OrbitControls captures `camera.up` once in
+    // its constructor to pick the orbit axis, so this must be set first —
+    // changing it later leaves the controls orbiting around Y.
+    camera.up.set(0, 0, 1);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
 
-    scene.add(new THREE.HemisphereLight(0xbcd4ff, 0x1a2030, 2.0));
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x000000, 2.0);
+    scene.add(hemi);
     const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(1, 1.4, 1.2);
     scene.add(key);
 
-    const grid = new THREE.GridHelper(100, 20, 0x39424f, 0x232b36);
-    grid.rotation.x = Math.PI / 2; // model space is Z-up, like STL
-    scene.add(grid);
 
     const group = new THREE.Group();
     scene.add(group);
@@ -65,7 +79,7 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
     const arrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 1, 0x22c55e);
     scene.add(arrow);
 
-    const ctx = { renderer, scene, camera, controls, group, planeMesh, planeEdge, arrow, grid, current: null, radius: 50 };
+    const ctx = { renderer, scene, camera, controls, group, planeMesh, planeEdge, arrow, hemi, grid: null, gridScale: 1, current: null, radius: 50 };
     ctxRef.current = ctx;
 
     const resize = () => {
@@ -99,6 +113,8 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
       planeMesh.material.dispose();
       planeEdge.geometry.dispose();
       planeEdge.material.dispose();
+      ctx.grid?.geometry.dispose();
+      ctx.grid?.material.dispose();
       renderer.dispose();
       host.removeChild(renderer.domElement);
     };
@@ -124,7 +140,7 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
     // attribute is needed. That halves GPU memory for the mesh and is also the
     // honest way to draw an STL, which is faceted by definition.
     const obj = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-      color: 0x9fb4d0, metalness: 0.05, roughness: 0.65, flatShading: true,
+      color: ctx.palette?.mesh ?? PALETTES.light.mesh, metalness: 0.05, roughness: 0.65, flatShading: true,
     }));
     ctx.group.add(obj);
     ctx.current = obj;
@@ -132,7 +148,8 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
     const sphere = geo.boundingSphere;
     ctx.radius = Math.max(sphere.radius, 1e-3);
     ctx.center = sphere.center.clone();
-    ctx.grid.scale.setScalar(Math.max(ctx.radius / 25, 0.02));
+    ctx.gridScale = Math.max(ctx.radius / 25, 0.02);
+    ctx.grid?.scale.setScalar(ctx.gridScale);
     frame(ctx);
   }, [mesh]);
 
@@ -140,12 +157,37 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
     if (ctxRef.current) frame(ctxRef.current);
   }, [resetKey]);
 
+  // Recolour the scene for the active theme. GridHelper bakes its colours into
+  // vertex data, so the grid is rebuilt rather than recoloured.
+  useEffect(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const pal = PALETTES[theme] || PALETTES.light;
+    ctx.palette = pal;
+    ctx.scene.background.setHex(pal.background);
+    ctx.hemi.color.setHex(pal.sky);
+    ctx.hemi.groundColor.setHex(pal.ground);
+    ctx.current?.material.color.setHex(pal.mesh);
+    if (ctx.grid) {
+      ctx.scene.remove(ctx.grid);
+      ctx.grid.geometry.dispose();
+      ctx.grid.material.dispose();
+    }
+    const grid = new THREE.GridHelper(100, 20, pal.gridCenter, pal.grid);
+    grid.rotation.x = Math.PI / 2; // model space is Z-up, like STL
+    grid.scale.setScalar(ctx.gridScale);
+    ctx.scene.add(grid);
+    ctx.grid = grid;
+  }, [theme]);
+
   // Keep the plane widget in sync with the settings.
   useEffect(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
-    const color = mode === 'intersection' ? 0xef4444 : 0x22c55e;
+    const pal = PALETTES[theme] || PALETTES.light;
+    const color = mode === 'intersection' ? pal.cut : pal.view;
     ctx.planeMesh.material.color.setHex(color);
+    ctx.planeMesh.material.opacity = pal.planeOpacity;
     ctx.planeEdge.material.color.setHex(color);
     ctx.arrow.setColor(new THREE.Color(color));
     ctx.arrow.visible = mode === 'projection';
@@ -163,7 +205,7 @@ export default function Viewer3D({ mesh, basis, offset, mode, resetKey }) {
     ctx.arrow.position.copy(start);
     ctx.arrow.setDirection(n.clone().negate());
     ctx.arrow.setLength(ctx.radius * 1.1, ctx.radius * 0.22, ctx.radius * 0.12);
-  }, [basis, offset, mode]);
+  }, [basis, offset, mode, theme]);
 
   return (
     <div className="viewer-canvas" ref={hostRef}>

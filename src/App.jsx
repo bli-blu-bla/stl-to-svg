@@ -3,11 +3,15 @@ import Dropzone from './components/Dropzone.jsx';
 import Settings from './components/Settings.jsx';
 import Viewer3D from './components/Viewer3D.jsx';
 import Results from './components/Results.jsx';
+import Measure from './components/Measure.jsx';
 import { parseSTL } from './lib/stl.js';
 import { basisFor, boundsOf, normalFromAngles, offsetRange } from './lib/plane.js';
 import { convert, cancelAll } from './lib/converter.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import { Auto, Close as CloseIcon, Code, Logo, Moon, Shield, Sun } from './components/Icons.jsx';
+import { useTheme } from './lib/theme.js';
 
+const REPO_URL = 'https://github.com/bli-blu-bla/stl-to-svg';
 const MAX_FILES = 5;
 // Beyond this a 100 MB mesh already costs ~150 MB of live buffers, and the
 // browser tab is the only budget we have. Rejecting early beats an OOM crash.
@@ -35,6 +39,7 @@ export default function App() {
   const [progress, setProgress] = useState(null);
   const [resetKey, setResetKey] = useState(0);
   const [notice, setNotice] = useState(null);
+  const [measureId, setMeasureId] = useState(null);
   const nextId = useRef(1);
   // Guards the auto-centering of the offset so it only runs on a genuinely new
   // plane/model, not on every user drag of the slider.
@@ -191,87 +196,113 @@ export default function App() {
   }, []);
 
   const anySvg = files.some((f) => results[f.id]?.svg);
+  // Everything that has (or is about to get) an SVG can be measured.
+  const measurable = files
+    .filter((f) => results[f.id] && !results[f.id].error)
+    .map((f) => ({ id: f.id, name: f.name, svg: results[f.id].svg, url: results[f.id].url }));
+  const closeMeasure = useCallback(() => setMeasureId(null), []);
+
+  // Leave the measuring view once nothing is left to measure.
+  useEffect(() => {
+    if (measureId !== null && !files.some((f) => f.id === measureId)) setMeasureId(null);
+  }, [files, measureId]);
   const usableCount = files.filter((f) => !f.error).length;
+
+  const theme = useTheme();
+  const themeLabel = { auto: 'Auto', light: 'Light', dark: 'Dark' }[theme.pref];
+  const ThemeIcon = { auto: Auto, light: Sun, dark: Moon }[theme.pref];
 
   return (
     <>
       <header className="site-header">
         <div className="wrap">
-          <div className="brand"><span className="brand-mark">◪</span> STL Tools</div>
+          <a className="brand" href="#top" aria-label="STL to SVG — home">
+            <Logo />
+            <span>STL<span className="arrow"> → </span>SVG</span>
+          </a>
           <nav aria-label="Sections">
-            <a href="#how-to">How to use</a>
-            <a href="#features">Features</a>
+            <a href="#top" className="current">Workspace</a>
+            <a href="#how-to">How it works</a>
           </nav>
+          <div className="header-tools">
+            <span className="pill"><Shield /> Runs offline · files never leave your machine</span>
+            <a className="btn small" href={REPO_URL} target="_blank" rel="noreferrer">
+              <Code /> <span className="gh-label">Source on GitHub</span>
+            </a>
+            <button
+              className="btn small"
+              onClick={theme.cycle}
+              aria-label={`Theme: ${themeLabel}. Click to change.`}
+              title={`Theme: ${themeLabel}`}
+            >
+              <ThemeIcon /> {themeLabel}
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="wrap">
-        <div className="hero">
-          <h1>STL to SVG Converter</h1>
-          <p>Convert 3D STL files to 2D SVG paths for laser cutting, CNC routing, and fabrication.</p>
-          <div className="badges">
-            <span className="badge">Projection Outlines</span>
-            <span className="badge">Intersection Paths</span>
-            <span className="badge">Custom Planes</span>
-            <span className="badge">3D Preview</span>
-            <span className="badge">Runs fully offline</span>
+      <main className="wrap" id="top">
+        <div className="intro">
+          <div>
+            <p className="eyebrow">3D mesh → 2D cut path</p>
+            <h1>STL to SVG converter</h1>
           </div>
+          <p>Slice or project a 3D model onto a plane and get clean SVG outlines for laser cutting, CNC routing and templates.</p>
         </div>
 
-        <Dropzone onFiles={addFiles} maxFiles={MAX_FILES} />
-        {notice && <div className={`note${notice.error ? ' error' : ''}`}>{notice.text}</div>}
-
-        {files.length > 0 && (
-          <div className="files">
-            {files.map((f) => (
-              <div key={f.id} className={`file-row${f.id === selectedId ? ' active' : ''}`}>
-                <button
-                  className="pick"
-                  aria-disabled={!!f.error}
-                  onClick={() => !f.error && setSelectedId(f.id)}
-                >
-                  <div className="name">{f.name}</div>
-                  {f.error
-                    ? <div className="err">{f.error}</div>
-                    : <div className="meta">{(f.size / 1048576).toFixed(2)} MB · {f.triangles.toLocaleString('en-US')} triangles · {f.bounds.size.map((v) => v.toFixed(1)).join(' × ')} mm</div>}
-                </button>
-                <button className="btn icon" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.id)}>✕</button>
-              </div>
-            ))}
-          </div>
-        )}
-
         <div className="workspace">
-          <div className="panel viewer">
-            <h3>
-              3D Preview
-              <span className="spacer">
-                <button className="btn small" onClick={() => setResetKey((k) => k + 1)}>Reset View</button>
-              </span>
-            </h3>
+          <section className="rail" aria-label="Files">
+            <Dropzone onFiles={addFiles} maxFiles={MAX_FILES} />
+            {notice && <div className={`note${notice.error ? ' error' : ''}`}>{notice.text}</div>}
+            {files.length > 0 && (
+              <ul className="files">
+                {files.map((f) => (
+                  <li key={f.id} className={`file-row${f.id === selectedId ? ' active' : ''}`}>
+                    <button
+                      className="pick"
+                      aria-disabled={!!f.error}
+                      aria-current={f.id === selectedId ? 'true' : undefined}
+                      onClick={() => !f.error && setSelectedId(f.id)}
+                    >
+                      <div className="name">{f.name}</div>
+                      {f.error
+                        ? <div className="err">{f.error}</div>
+                        : <div className="meta">{f.triangles.toLocaleString('en-US')} tri · {f.bounds.size.map((v) => v.toFixed(1)).join(' × ')} mm</div>}
+                    </button>
+                    <button className="btn icon" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.id)}><CloseIcon /></button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="panel viewer" aria-label="3D preview">
+            <div className="panel-head">
+              <h2 className="panel-title">3D preview</h2>
+              <button className="btn small" onClick={() => setResetKey((k) => k + 1)}>Reset view</button>
+            </div>
             <ErrorBoundary
               title="The 3D preview stopped working."
               hint="Conversion and download are unaffected."
             >
-              <Viewer3D mesh={selected?.error ? null : selected} basis={basis} offset={s.offset} mode={s.mode} resetKey={resetKey} />
+              <Viewer3D mesh={selected?.error ? null : selected} basis={basis} offset={s.offset} mode={s.mode} resetKey={resetKey} theme={theme.resolved} />
             </ErrorBoundary>
-            <div className="plane-note">
-              <span className="swatch" style={{ background: s.mode === 'intersection' ? 'var(--red)' : 'var(--green)' }} />
+            <p className="plane-note">
+              <span className="swatch" style={{ background: s.mode === 'intersection' ? 'var(--accent)' : 'var(--measure)' }} />
               {s.mode === 'intersection'
-                ? <span><strong>Red plane:</strong> shows the cutting plane. All geometry intersecting this plane will create outline paths.</span>
-                : <span><strong>Green plane:</strong> shows the projection surface. The arrow points along the viewing direction your outline is seen from.</span>}
-            </div>
-          </div>
+                ? <span><strong>Cutting plane</strong> — every edge where this plane meets the model becomes a path.</span>
+                : <span><strong>Projection surface</strong> — the arrow shows the direction the silhouette is seen from.</span>}
+            </p>
+          </section>
 
-          <div>
-            <Settings s={s} set={set} range={range} disabled={!selected} />
+          <Settings s={s} set={set} range={range} disabled={!selected}>
             <div className="actions">
-              <button className="btn primary" disabled={!usableCount || busy} onClick={runConversion}>
-                {busy ? 'Converting…' : `Convert to SVG${usableCount > 1 ? ` (${usableCount})` : ''}`}
+              <button className="btn accent big" disabled={!usableCount || busy} onClick={runConversion}>
+                {busy ? 'Converting…' : usableCount > 1 ? `Convert ${usableCount} files` : 'Convert to SVG'}
               </button>
               {busy
-                ? <button className="btn" onClick={cancel}>Cancel</button>
-                : <button className="btn" disabled={!anySvg} onClick={downloadAll}>Download All SVG</button>}
+                ? <button className="btn big" onClick={cancel}>Cancel</button>
+                : <button className="btn big" disabled={!anySvg} onClick={downloadAll}>Download all</button>}
             </div>
             {progress && (
               <div className="progress" role="status" aria-live="polite">
@@ -284,64 +315,52 @@ export default function App() {
                 </div>
               </div>
             )}
-          </div>
+          </Settings>
         </div>
 
         <ErrorBoundary title="The result gallery stopped working.">
-          <Results files={files} results={results} onDownload={download} />
+          <Results files={files} results={results} onDownload={download} onMeasure={(f) => setMeasureId(f.id)} />
         </ErrorBoundary>
 
-        <section className="block" id="features">
-          <div className="cards">
-            <div className="card">
-              <h4>Laser Cutting Ready</h4>
-              <p>Generate precise SVG paths optimised for laser cutters, with customisable stroke widths and resolution settings.</p>
-            </div>
-            <div className="card">
-              <h4>Multiple Modes</h4>
-              <p>Choose between projection outlines for templates or intersection paths for cross-sections and internal structures.</p>
-            </div>
-            <div className="card">
-              <h4>Visual Preview</h4>
-              <p>See your 3D model and the cutting plane in real time before converting, so the result is what you expect.</p>
-            </div>
-          </div>
-        </section>
-
         <section className="block" id="how-to">
-          <h2>How to Use the STL to SVG Converter</h2>
+          <h2>How it works</h2>
           <div className="howto">
-            <div className="card">
-              <h4>Projection Mode — step by step</h4>
+            <div className="panel">
+              <h3><span className="swatch" style={{ background: 'var(--accent)' }} />Intersection — a cross-section</h3>
               <ol>
-                <li><strong>Upload your STL file</strong> by dragging it in or clicking to browse.</li>
-                <li><strong>Select Projection Outline</strong> in the conversion settings.</li>
-                <li><strong>Choose your viewing plane:</strong> XY (top), XZ (front), YZ (side), or a custom orientation.</li>
-                <li><strong>Adjust settings:</strong> resolution, stroke width, and output units.</li>
-                <li><strong>Check the 3D preview:</strong> the green plane is your projection surface.</li>
-                <li><strong>Convert</strong> and <strong>download</strong> — the SVG holds the silhouette of the model, holes included.</li>
+                <li><strong>Upload your STL</strong> by dropping it in or browsing.</li>
+                <li><strong>Pick Intersection</strong> and a cutting plane: XY, XZ, YZ or a custom angle.</li>
+                <li><strong>Move the offset</strong> until the orange plane sits where you want the cut.</li>
+                <li><strong>Convert</strong> — every edge where the plane meets the geometry becomes a path.</li>
+                <li><strong>Measure or download</strong> the SVG.</li>
               </ol>
-              <p className="best-for"><strong>Best for:</strong> templates, stencils, gaskets, and simple cutting patterns where you need the outline shape of your 3D object.</p>
+              <p className="best-for"><strong>Best for:</strong> cross-sections, layered cutting templates and inspecting hollow parts.</p>
             </div>
-            <div className="card">
-              <h4>Intersection Mode — step by step</h4>
+            <div className="panel">
+              <h3><span className="swatch" style={{ background: 'var(--measure)' }} />Projection — a silhouette</h3>
               <ol>
-                <li><strong>Upload your STL file.</strong></li>
-                <li><strong>Select Intersection Outline</strong> in the conversion settings.</li>
-                <li><strong>Choose the cutting plane</strong> or define a custom orientation.</li>
-                <li><strong>Set the plane offset</strong> to position where the plane cuts through the model.</li>
-                <li><strong>Check the 3D preview:</strong> the red plane shows exactly where the model is sliced.</li>
-                <li><strong>Convert</strong> and <strong>download</strong> — the SVG holds every edge where the plane meets the geometry.</li>
+                <li><strong>Upload your STL.</strong></li>
+                <li><strong>Pick Projection</strong> and the plane you look through.</li>
+                <li><strong>Set resolution and stroke width</strong> for your cutter.</li>
+                <li><strong>Convert</strong> — the SVG holds the model’s outline, holes included.</li>
+                <li><strong>Measure or download</strong> the SVG.</li>
               </ol>
-              <p className="best-for"><strong>Best for:</strong> cross-sections, internal structure patterns, layered cutting templates, and inspecting hollow geometry.</p>
+              <p className="best-for"><strong>Best for:</strong> templates, stencils, gaskets and simple cutting patterns.</p>
             </div>
           </div>
         </section>
       </main>
 
+      {measureId !== null && (
+        <ErrorBoundary title="The measuring view stopped working.">
+          <Measure items={measurable} activeId={measureId} onSelect={setMeasureId} onClose={closeMeasure} />
+        </ErrorBoundary>
+      )}
+
       <footer className="site-footer">
         <div className="wrap">
-          STL to SVG Converter — all conversion happens locally in your browser; no file ever leaves your machine.
+          <span>All conversion happens locally in your browser — no file ever leaves your machine.</span>
+          <span>Open source · <a href={REPO_URL} target="_blank" rel="noreferrer">github.com/bli-blu-bla/stl-to-svg</a></span>
         </div>
       </footer>
     </>

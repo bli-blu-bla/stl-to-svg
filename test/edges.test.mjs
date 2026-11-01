@@ -82,3 +82,29 @@ test('a chamfered boss draws two whole circles, not fragments', () => {
   assert.equal(paths.length, 2);
   assert.ok(paths.every((p) => p.closed));
 });
+
+// A 20×10×4 block whose vertical edges are rounded (r = 2), seen from the
+// front: its side walls are edge-on, and the outline runs where the rounding
+// meets them — between a face turned to the viewer and one seen edge-on.
+test('outline where a rounded edge meets a wall seen edge-on', () => {
+  const a = 10; const b = 5; const r = 2; const h = 4; const SEG = 6;
+  const ring = [];
+  for (const [cx, cy, start] of [[a - r, b - r, 0], [-a + r, b - r, 90], [-a + r, -b + r, 180], [a - r, -b + r, 270]]) {
+    for (let i = 0; i <= SEG; i++) {
+      const t = ((start + (90 * i) / SEG) * Math.PI) / 180;
+      ring.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]);
+    }
+  }
+  const tris = [];
+  for (let i = 0; i < ring.length; i++) {
+    const [x0, y0] = ring[i]; const [x1, y1] = ring[(i + 1) % ring.length];
+    tris.push([[x0, y0, 0], [x1, y1, 0], [x1, y1, h]], [[x0, y0, 0], [x1, y1, h], [x0, y0, h]]);
+    tris.push([[0, 0, h], [x0, y0, h], [x1, y1, h]], [[0, 0, 0], [x1, y1, 0], [x0, y0, 0]]);
+  }
+  const paths = projectEdges(mesh(tris), basisFor('XZ'), 0.01, 30);
+  // The full rectangle, both sides included.
+  close(totalLength(paths), 2 * (2 * a + h), 0.05);
+  const xs = paths.flatMap((p) => p.points.map(([x]) => x));
+  close(Math.min(...xs), -a);
+  close(Math.max(...xs), a);
+});

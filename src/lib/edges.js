@@ -19,6 +19,9 @@ const GRID_CELLS = 2048; // Depth-buffer resolution along the longer side.
 const MAX_SLOPE = 8;
 // Distance (in cells) from a sample to the far corner of its 3×3 neighbourhood.
 const REACH_CELLS = 2.2;
+// A face counts as turned towards the viewer above this cosine; below, it is
+// seen edge-on or from behind. Above float rounding of a wall's normal.
+const FACING = 1e-5;
 
 export function projectEdges(positions, basis, tolerance, edgeAngle = 30, onProgress) {
   const { u, v } = basis;
@@ -152,8 +155,11 @@ export function featureEdges(positions, w, edgeAngle, extent) {
     let keep = rec.count !== 2; // Open or non-manifold: always an edge.
     if (!keep) {
       const n1 = n(rec.f1); const n2 = n(rec.f2);
+      // Silhouette of a curved surface: one face turned towards the viewer,
+      // the other not. "Not" includes faces seen exactly edge-on — a rounded
+      // edge running into a wall parallel to the view has its outline there.
       keep = dot(n1, n2) < cosLimit // Crease.
-        || dot(n1, w) * dot(n2, w) < -1e-12; // Silhouette of a curved surface.
+        || (dot(n1, w) > FACING) !== (dot(n2, w) > FACING);
     }
     if (keep) {
       out.push(

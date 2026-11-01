@@ -84,7 +84,7 @@ export default function Settings({ s, set, range, disabled, children }) {
               </div>
               <input id="edge-angle" type="range" min="5" max="90" step="1"
                 value={s.edgeAngle} onChange={(e) => set({ edgeAngle: +e.target.value })} />
-              <span className="field-hint">Faces meeting at a sharper angle draw a line. Lower it to show more of curved surfaces.</span>
+              <span className="field-hint">A line is drawn where the surface bends by more than this. The outline is always drawn. Higher values keep only sharp edges; lower values add chamfers and the facets of rounded edges.</span>
             </>
           )}
         </div>

@@ -30,17 +30,40 @@ const DEFAULTS = {
   quality: 'auto',
 };
 
+const PLANE_NAME = (s) => (s.planeKey === 'custom' ? `custom ${s.yaw}°/${s.pitch}°` : s.planeKey);
+const PLANE_SLUG = (s) => (s.planeKey === 'custom' ? `custom-${s.yaw}-${s.pitch}` : s.planeKey);
+
+// Human label and file-name part describing what a cut was made with.
+function describeCut(s) {
+  if (s.mode === 'projection') return { label: `Projection · ${PLANE_NAME(s)}`, slug: `projection-${PLANE_SLUG(s)}` };
+  const off = s.offset.toFixed(2);
+  return { label: `Section · ${PLANE_NAME(s)} @ ${off} mm`, slug: `section-${PLANE_SLUG(s)}-${off}mm` };
+}
+
+// Everything that changes a cut's output, so identical re-runs can be spotted.
+function cutKey(fileId, s) {
+  return JSON.stringify([
+    fileId, s.mode, s.planeKey,
+    s.planeKey === 'custom' ? [s.yaw, s.pitch] : null,
+    s.mode === 'intersection' ? Math.round(s.offset * 1e6) : null,
+    s.resolution, s.strokeWidth, s.unit,
+    s.mode === 'projection' ? s.quality : null,
+  ]);
+}
+
 export default function App() {
   const [files, setFiles] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [s, setS] = useState(DEFAULTS);
-  const [results, setResults] = useState({});
+  // Every conversion adds cuts here; older ones stay until removed.
+  const [cuts, setCuts] = useState([]);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(null);
   const [resetKey, setResetKey] = useState(0);
   const [notice, setNotice] = useState(null);
   const [measureId, setMeasureId] = useState(null);
   const nextId = useRef(1);
+  const nextCutId = useRef(1);
   // Guards the auto-centering of the offset so it only runs on a genuinely new
   // plane/model, not on every user drag of the slider.
   const offsetKey = useRef(null);
@@ -102,14 +125,25 @@ export default function App() {
     if (firstUsable) setSelectedId((prev) => prev ?? firstUsable.id);
   }, [files.length]);
 
+  // Cuts outlive their file: removing an STL to make room keeps its results.
   const removeFile = useCallback((id) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
-    setResults((prev) => {
-      if (prev[id]?.url) URL.revokeObjectURL(prev[id].url);
-      const { [id]: _drop, ...rest } = prev;
-      return rest;
-    });
     setSelectedId((prev) => (prev === id ? null : prev));
+  }, []);
+
+  const removeCut = useCallback((id) => {
+    setCuts((prev) => {
+      const gone = prev.find((c) => c.id === id);
+      if (gone?.url) URL.revokeObjectURL(gone.url);
+      return prev.filter((c) => c.id !== id);
+    });
+  }, []);
+
+  const clearCuts = useCallback(() => {
+    setCuts((prev) => {
+      for (const c of prev) if (c.url) URL.revokeObjectURL(c.url);
+      return prev.filter((c) => c.busy); // Running conversions finish into the list.
+    });
   }, []);
 
   // Re-select something sensible whenever the current selection disappears.
@@ -124,13 +158,28 @@ export default function App() {
     setBusy(true);
     setNotice(null);
 
-    setResults((prev) => {
-      for (const r of Object.values(prev)) if (r.url) URL.revokeObjectURL(r.url);
-      return Object.fromEntries(usable.map((f) => [f.id, { busy: true }]));
+    // New cuts go to the front, in file order. Re-running identical settings
+    // on a file replaces that cut instead of stacking duplicates.
+    const { label: cutLabel, slug } = describeCut(s);
+    const batch = usable.map((f) => ({
+      id: nextCutId.current++, fileId: f.id, name: f.name, label: cutLabel, slug, key: cutKey(f.id, s), busy: true,
+    }));
+    const keys = new Set(batch.map((c) => c.key));
+    setCuts((prev) => {
+      for (const c of prev) if (keys.has(c.key) && c.url) URL.revokeObjectURL(c.url);
+      return [...batch, ...prev.filter((c) => !keys.has(c.key))];
+    });
+    const update = (id, patch, url) => setCuts((prev) => {
+      if (!prev.some((c) => c.id === id)) { // Removed while it was converting.
+        if (url) URL.revokeObjectURL(url);
+        return prev;
+      }
+      return prev.map((c) => (c.id === id ? { ...c, busy: false, ...patch } : c));
     });
 
     let index = 0;
     for (const f of usable) {
+      const cut = batch[index];
       index++;
       const settings = {
         mode: s.mode,
@@ -151,15 +200,14 @@ export default function App() {
           // monotonically instead of resetting on every file.
           setProgress({ label, stage, fraction: (index - 1 + (fraction || 0)) / usable.length }));
         const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
-        setResults((prev) => ({ ...prev, [f.id]: { svg, stats, url } }));
+        update(cut.id, { svg, stats, url }, url);
       } catch (err) {
         if (err?.cancelled) {
           // Drop the placeholders of everything that never ran.
-          setResults((prev) => Object.fromEntries(
-            Object.entries(prev).filter(([, r]) => !r.busy)));
+          setCuts((prev) => prev.filter((c) => !c.busy));
           break;
         }
-        setResults((prev) => ({ ...prev, [f.id]: { error: err?.message || 'Conversion failed.' } }));
+        update(cut.id, { error: err?.message || 'Conversion failed.' });
       }
     }
     setBusy(false);
@@ -172,40 +220,39 @@ export default function App() {
     setProgress(null);
   }, []);
 
-  const download = useCallback((file) => {
-    const r = results[file.id];
-    if (!r?.svg) return;
+  // The settings go into the file name, so several cuts of one part don't
+  // overwrite each other in the downloads folder.
+  const download = useCallback((cut) => {
+    if (!cut?.svg) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([r.svg], { type: 'image/svg+xml' }));
-    a.download = file.name.replace(/\.stl$/i, '') + `-${s.mode}.svg`;
+    a.href = URL.createObjectURL(new Blob([cut.svg], { type: 'image/svg+xml' }));
+    a.download = `${cut.name.replace(/\.stl$/i, '')}-${cut.slug}.svg`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }, [results, s.mode]);
-
-  const downloadAll = useCallback(() => {
-    files.forEach((f, i) => {
-      if (results[f.id]?.svg) setTimeout(() => download(f), i * 150);
-    });
-  }, [files, results, download]);
-
-  // Release preview blobs on unmount; the per-conversion cleanup handles the rest.
-  const resultsRef = useRef(results);
-  resultsRef.current = results;
-  useEffect(() => () => {
-    for (const r of Object.values(resultsRef.current)) if (r.url) URL.revokeObjectURL(r.url);
   }, []);
 
-  const anySvg = files.some((f) => results[f.id]?.svg);
+  const downloadAll = useCallback(() => {
+    cuts.filter((c) => c.svg).forEach((c, i) => setTimeout(() => download(c), i * 150));
+  }, [cuts, download]);
+
+  // Release preview blobs on unmount; removal and replacement handle the rest.
+  const cutsRef = useRef(cuts);
+  cutsRef.current = cuts;
+  useEffect(() => () => {
+    for (const c of cutsRef.current) if (c.url) URL.revokeObjectURL(c.url);
+  }, []);
+
+  const anySvg = cuts.some((c) => c.svg);
   // Everything that has (or is about to get) an SVG can be measured.
-  const measurable = files
-    .filter((f) => results[f.id] && !results[f.id].error)
-    .map((f) => ({ id: f.id, name: f.name, svg: results[f.id].svg, url: results[f.id].url }));
+  const measurable = cuts
+    .filter((c) => !c.error)
+    .map((c) => ({ id: c.id, name: c.name, label: c.label, svg: c.svg, url: c.url }));
   const closeMeasure = useCallback(() => setMeasureId(null), []);
 
-  // Leave the measuring view once nothing is left to measure.
+  // Leave the measuring view once its cut is gone.
   useEffect(() => {
-    if (measureId !== null && !files.some((f) => f.id === measureId)) setMeasureId(null);
-  }, [files, measureId]);
+    if (measureId !== null && !cuts.some((c) => c.id === measureId)) setMeasureId(null);
+  }, [cuts, measureId]);
   const usableCount = files.filter((f) => !f.error).length;
 
   const theme = useTheme();
@@ -319,7 +366,7 @@ export default function App() {
         </div>
 
         <ErrorBoundary title="The result gallery stopped working.">
-          <Results files={files} results={results} onDownload={download} onMeasure={(f) => setMeasureId(f.id)} />
+          <Results cuts={cuts} onDownload={download} onMeasure={(c) => setMeasureId(c.id)} onRemove={removeCut} onClear={clearCuts} />
         </ErrorBoundary>
 
         <section className="block" id="how-to">

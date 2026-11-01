@@ -99,8 +99,9 @@ test('a custom plane orientation converts', async ({ page }) => {
 test('changing output units changes the SVG dimensions', async ({ page }) => {
   await upload(page, CUBE_ASCII);
   await convert(page);
+  // New cuts are added in front, so the latest one is always first.
   const read = async () => {
-    const src = await page.locator('.result-card img').getAttribute('src');
+    const src = await page.locator('.result-card img').first().getAttribute('src');
     return page.evaluate((u) => fetch(u).then((r) => r.text()), src);
   };
   expect(await read()).toContain('width="20.1mm"');
@@ -228,4 +229,42 @@ test('a tall part\'s preview stays inside its thumbnail', async ({ page }) => {
   expect(img.y).toBeGreaterThanOrEqual(thumb.y);
   expect(img.y + img.height).toBeLessThanOrEqual(thumb.y + thumb.height + 0.5);
   expect(img.x + img.width).toBeLessThanOrEqual(thumb.x + thumb.width + 0.5);
+});
+
+test('cuts accumulate instead of replacing each other', async ({ page }) => {
+  await upload(page, CUBE_ASCII);
+  await convert(page);
+  await page.getByLabel('Plane offset value').fill('5');
+  await convert(page);
+
+  const cards = page.locator('.result-card');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0).locator('.cut-label')).toHaveText('Section · XY @ 5.00 mm');
+  await expect(cards.nth(1).locator('.cut-label')).toHaveText('Section · XY @ 0.00 mm');
+
+  // The same settings again replace that cut rather than duplicating it.
+  await convert(page);
+  await expect(cards).toHaveCount(2);
+
+  // Each cut downloads under its own name.
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    cards.nth(0).getByRole('button', { name: 'Download SVG' }).click(),
+  ]);
+  expect(dl.suggestedFilename()).toBe('cube-section-XY-5.00mm.svg');
+
+  await cards.nth(1).getByRole('button', { name: /^Delete cut/ }).click();
+  await expect(cards).toHaveCount(1);
+  await expect(cards.first().locator('.cut-label')).toHaveText('Section · XY @ 5.00 mm');
+
+  await page.getByRole('button', { name: 'Clear all' }).click();
+  await expect(cards).toHaveCount(0);
+});
+
+test('removing a file keeps the cuts made from it', async ({ page }) => {
+  await upload(page, CUBE_ASCII);
+  await convert(page);
+  await page.getByRole('button', { name: /^Remove cube/ }).click();
+  await expect(page.locator('.file-row')).toHaveCount(0);
+  await expect(page.locator('.result-card')).toHaveCount(1);
 });

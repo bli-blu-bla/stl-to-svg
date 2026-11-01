@@ -1,23 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatLength, parseSVG } from '../lib/measure.js';
-import { Download, Ruler } from './Icons.jsx';
+import { Close, Download, Ruler } from './Icons.jsx';
 
-export default function Results({ files, results, onDownload, onMeasure }) {
+export default function Results({ cuts, onDownload, onMeasure, onRemove, onClear }) {
   const [zoom, setZoom] = useState(null);
-  const done = files.filter((f) => results[f.id]);
-  if (!done.length) return null;
+  if (!cuts.length) return null;
 
   return (
     <section className="results" aria-label="Results">
       <div className="section-head">
-        <h2>Results</h2>
-        <span>Click a preview to enlarge</span>
+        <h2>Results <span className="count">{cuts.length}</span></h2>
+        <div className="section-tools">
+          <span>Click a preview to enlarge</span>
+          <button className="btn small" onClick={onClear} disabled={cuts.every((c) => c.busy)}>Clear all</button>
+        </div>
       </div>
       <div className="results-grid">
-        {done.map((f) => (
+        {cuts.map((c) => (
           <ResultCard
-            key={f.id} file={f} result={results[f.id]}
-            onZoom={setZoom} onDownload={onDownload} onMeasure={onMeasure}
+            key={c.id} cut={c}
+            onZoom={setZoom} onDownload={onDownload} onMeasure={onMeasure} onRemove={onRemove}
           />
         ))}
       </div>
@@ -26,7 +28,7 @@ export default function Results({ files, results, onDownload, onMeasure }) {
   );
 }
 
-function ResultCard({ file: f, result: r, onZoom, onDownload, onMeasure }) {
+function ResultCard({ cut: r, onZoom, onDownload, onMeasure, onRemove }) {
   // The real part size, read back from the SVG (stroke margin excluded).
   const size = useMemo(() => {
     if (!r.svg) return null;
@@ -45,25 +47,31 @@ function ResultCard({ file: f, result: r, onZoom, onDownload, onMeasure }) {
       )}
       {r.error && <div className="thumb failed">{r.error}</div>}
       {r.url && (
-        <button className="thumb paper" onClick={() => onZoom({ url: r.url, name: f.name })} aria-label={`Enlarge ${f.name}`}>
-          <img src={r.url} alt={`SVG preview of ${f.name}`} />
+        <button className="thumb paper" onClick={() => onZoom({ url: r.url, name: r.name })} aria-label={`Enlarge ${r.name}, ${r.label}`}>
+          <img src={r.url} alt={`SVG preview of ${r.name}, ${r.label}`} />
+        </button>
+      )}
+      {!r.busy && (
+        <button className="btn icon remove" onClick={() => onRemove(r.id)} aria-label={`Delete cut: ${r.name}, ${r.label}`} title="Remove this cut">
+          <Close />
         </button>
       )}
       <div className="body">
         <div className="title-row">
-          <h3 className="name" title={f.name}>{f.name}</h3>
+          <h3 className="name" title={r.name}>{r.name}</h3>
           {size && <span className="dims">{size}</span>}
         </div>
+        <div className="cut-label">{r.label}</div>
         {r.stats && (
           <div className="stats">
             {r.stats.paths} path{r.stats.paths === 1 ? '' : 's'} · {r.stats.vertices} points · {r.stats.ms} ms
           </div>
         )}
         <div className="btns">
-          <button className="btn ink" disabled={!r.svg} onClick={() => onDownload(f)}>
+          <button className="btn ink" disabled={!r.svg} onClick={() => onDownload(r)}>
             <Download /> Download SVG
           </button>
-          <button className="btn outline" disabled={!r.svg} onClick={() => onMeasure(f)}>
+          <button className="btn outline" disabled={!r.svg} onClick={() => onMeasure(r)}>
             <Ruler /> Measure
           </button>
         </div>

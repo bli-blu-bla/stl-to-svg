@@ -97,7 +97,7 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
   const copyAll = async () => {
     const lines = list.map((m, i) => `${i + 1}. ${summaryText(m, unit)}`);
     try {
-      await navigator.clipboard.writeText(`${active?.name}\n${lines.join('\n')}\n`);
+      await navigator.clipboard.writeText(`${active?.name}${active?.label ? ` — ${active.label}` : ''}\n${lines.join('\n')}\n`);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch { /* clipboard blocked — nothing to do */ }
@@ -266,6 +266,7 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
         <button className="btn icon back-btn" onClick={onClose} aria-label="Back to workspace"><Back /></button>
         <div className="measure-title">
           <strong title={active?.name}>{active?.name || 'No SVG selected'}</strong>
+          {active?.label && <span className="measure-label">{active.label}</span>}
           {geom && <span className="measure-size">{dims(geom)}</span>}
         </div>
         <div className="measure-tools">
@@ -379,6 +380,7 @@ export default function Measure({ items, activeId, onSelect, onClose }) {
                     <span className="t">{it.url ? <img src={it.url} alt="" /> : '…'}</span>
                     <span className="n">
                       <b title={it.name}>{it.name}</b>
+                      {it.label && <small className="lbl">{it.label}</small>}
                       <small>{info ? dims(info.g) : 'converting…'}</small>
                     </span>
                     {info?.count > 0 && <span className="count" aria-label={`${info.count} measurements`}>{info.count}</span>}

@@ -31,6 +31,7 @@ const DEFAULTS = {
   quality: 'auto',
   detail: 'outline', // Projection: 'outline' (silhouette) or 'edges' (drawing view)
   edgeAngle: 30,
+  arcs: true, // Write recognised arcs and circles as such, not as chords
 };
 
 const PLANE_NAME = (s) => (s.planeKey === 'custom' ? `custom ${s.yaw}°/${s.pitch}°` : s.planeKey);
@@ -53,7 +54,7 @@ function cutKey(fileId, s) {
     fileId, s.mode, s.planeKey,
     s.planeKey === 'custom' ? [s.yaw, s.pitch] : null,
     s.mode === 'intersection' ? Math.round(s.offset * 1e6) : null,
-    s.resolution, s.strokeWidth, s.unit,
+    s.resolution, s.strokeWidth, s.unit, s.arcs,
     s.mode === 'projection' ? s.detail : null,
     s.mode === 'projection' && s.detail === 'outline' ? s.quality : null,
     s.mode === 'projection' && s.detail === 'edges' ? s.edgeAngle : null,
@@ -261,6 +262,7 @@ export default function App() {
         quality: s.quality,
         detail: s.detail,
         edgeAngle: s.edgeAngle,
+        arcs: s.arcs,
         title: f.name,
       };
       const label = usable.length > 1 ? `${f.name} (${index}/${usable.length})` : f.name;

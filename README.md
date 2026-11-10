@@ -37,6 +37,7 @@ green for the projection surface with an arrow showing the viewing direction.
 | Output Units | mm, cm, in, or px (96 dpi). STL coordinates are treated as millimetres. |
 | Plane Offset | Where along the plane normal the cut happens. Bounded by the model's extent. |
 | Resolution | Maximum distance a simplified path may deviate from the exact contour, 0.05–1 mm. |
+| Arcs and circles | On by default. Round holes become `<circle>` elements and rounded corners arc segments with their true radius, instead of runs of short lines. |
 | Stroke Width | Line width in millimetres; scaled into the chosen output unit so it stays physically constant. |
 | Outline Quality | Projection only — `exact`, `raster`, or `auto`. See below. |
 
@@ -68,6 +69,13 @@ browser tests serve the production build from a sub-path precisely to keep it tr
   time; this gives crisp straight edges. `raster` samples the silhouette onto a grid and
   runs marching squares — far cheaper, and what `auto` falls back to above 60k triangles
   (or if the boolean union fails).
+- `src/lib/arcs.js` — arc and circle recognition. It runs on each contour before
+  simplification, while every mesh vertex is still there, and looks for runs of vertices
+  on a common circle: at least four chords, none spanning more than 30°, all of about
+  one length, every vertex within half the resolution of the arc. So a circle needs
+  twelve sides or more — hexagons and octagons stay polygons — and a straight wall
+  between two fillets is never bent into one large arc. Curves that are not circular
+  (a cylinder cut at an angle) come out as a few arcs within the resolution.
 - `src/lib/geom2d.js` — segment chaining and Ramer–Douglas–Peucker simplification.
   Open chains are emitted separately so non-manifold meshes degrade gracefully instead
   of producing bogus loops.

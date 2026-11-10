@@ -162,6 +162,14 @@ export default function Settings({ s, set, range, disabled, children }) {
         )}
       </div>
 
+      <div className="field">
+        <label className="check">
+          <input type="checkbox" checked={s.arcs} onChange={(e) => set({ arcs: e.target.checked })} />
+          <span>Arcs and circles</span>
+        </label>
+        <span className="field-hint">Round holes are written as circles and rounded corners as arcs with their radius, instead of many short lines. Turn off if your software only reads straight segments.</span>
+      </div>
+
       {children}
     </section>
   );

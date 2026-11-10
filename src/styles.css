@@ -270,6 +270,8 @@ select, input[type="text"], input[type="number"] {
 input[type="number"] { font-family: var(--mono); }
 select:focus, input:focus { outline: 2px solid var(--measure); outline-offset: -1px; }
 input[type="range"] { width: 100%; accent-color: var(--accent); }
+.field > label.check { display: flex; align-items: center; gap: 8px; min-height: 24px; color: var(--text); cursor: pointer; }
+.check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .value-input { width: 104px !important; min-height: 32px !important; text-align: right; padding: 0 8px !important; }
 .range-hint { display: flex; justify-content: space-between; gap: 8px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
@@ -411,6 +413,7 @@ section.block > h2 { font-size: 20px; letter-spacing: -.01em; margin-bottom: 16p
 .m-dim.hot { --c: var(--hot); --on-c: var(--bg); }
 .m-dim line, .m-dim .m-arc { fill: none; stroke: var(--c); stroke-width: 1.5px; }
 .m-dim.live line { stroke-dasharray: 6 4; }
+.m-dim .m-circle { stroke-width: 1px; stroke-dasharray: 5 4; opacity: .8; }
 .m-dim.hot line, .m-dim.hot .m-arc { stroke-width: 2.5px; }
 .m-dim .m-arrow { fill: var(--c); }
 .m-end { fill: var(--canvas); stroke: var(--measure); stroke-width: 2px; }

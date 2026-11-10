@@ -12,7 +12,8 @@
 //    say — are merged, so a laser does not cut the same path twice.
 
 import { cross, dot } from './plane.js';
-import { chainSegments, simplify } from './geom2d.js';
+import { chainSegments } from './geom2d.js';
+import { tracePath, drawable } from './arcs.js';
 
 const GRID_CELLS = 2048; // Depth-buffer resolution along the longer side.
 // Steepest depth slope an edge's own faces may excuse (see featureEdges).
@@ -23,7 +24,7 @@ const REACH_CELLS = 2.2;
 // seen edge-on or from behind. Above float rounding of a wall's normal.
 const FACING = 1e-5;
 
-export function projectEdges(positions, basis, tolerance, edgeAngle = 30, onProgress) {
+export function projectEdges(positions, basis, tolerance, edgeAngle = 30, onProgress, arcs = false) {
   const { u, v } = basis;
   // Look from the side where (u, v) reads like a normal, unmirrored drawing.
   const w = cross(u, v);
@@ -98,8 +99,8 @@ export function projectEdges(positions, basis, tolerance, edgeAngle = 30, onProg
   // Merging re-derives endpoints from a shared line, which moves them by up to
   // half the line tolerance — weld at that scale so chains stay connected.
   return chainSegments(merged, lineTol)
-    .map((p) => ({ closed: p.closed, points: simplify(p.points, tolerance, p.closed) }))
-    .filter((p) => p.points.length >= 2);
+    .map((p) => tracePath(p.points, p.closed, tolerance, arcs))
+    .filter((p) => p.points.length >= 2 || drawable(p));
 }
 
 // Returns a flat array of 3D edge endpoints plus the steepest depth slope of

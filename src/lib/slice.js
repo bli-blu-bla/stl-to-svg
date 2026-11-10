@@ -1,9 +1,10 @@
 // Intersection mode: slice the mesh with a plane and return the resulting
 // cross-section contours in plane-local 2D coordinates.
 
-import { chainSegments, simplify } from './geom2d.js';
+import { chainSegments } from './geom2d.js';
+import { tracePath, drawable } from './arcs.js';
 
-export function sliceMesh(positions, basis, offset, tolerance) {
+export function sliceMesh(positions, basis, offset, tolerance, arcs = false) {
   const { n, u, v } = basis;
   const triCount = positions.length / 9;
   const segments = [];
@@ -58,8 +59,8 @@ export function sliceMesh(positions, basis, offset, tolerance) {
   // floating-point cracks between neighbouring triangles.
   const eps = Math.max(1e-9, tolerance * 1e-3);
   return chainSegments(segments, eps)
-    .map((p) => ({ closed: p.closed, points: simplify(p.points, tolerance, p.closed) }))
-    .filter((p) => p.points.length >= 2);
+    .map((p) => tracePath(p.points, p.closed, tolerance, arcs))
+    .filter((p) => p.points.length >= 2 || drawable(p));
 }
 
 // Interpolate along an edge in a canonical vertex order, so that the same edge

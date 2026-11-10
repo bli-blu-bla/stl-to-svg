@@ -25,6 +25,8 @@ export const Code = (p) => <Icon {...p}><path d="M5.5 4 L1.5 8 L5.5 12 M10.5 4 L
 export const Back = (p) => <Icon {...p}><path d="M10 3 L5 8 L10 13" strokeWidth="1.6" /></Icon>;
 export const Distance = (p) => <Icon {...p}><path d="M2 8 H14 M2 5 V11 M14 5 V11" /></Icon>;
 export const Angle = (p) => <Icon {...p}><path d="M2 13 H14 M2 13 L11 3 M7 13 A5 5 0 0 0 5.4 9.3" /></Icon>;
+export const Gap = (p) => <Icon {...p}><path d="M1.5 2.5 A7 7 0 0 0 1.5 13.5 M14.5 2.5 A7 7 0 0 1 14.5 13.5 M4.6 8 H11.4" /></Icon>;
+export const Circle = (p) => <Icon {...p}><circle cx="8" cy="8" r="5.8" /><path d="M8 8 L12.1 3.9" /></Icon>;
 export const Snap45 = (p) => <Icon {...p}><path d="M2 14 H14 M2 14 L12 4" /></Icon>;
 export const Plus = (p) => <Icon {...p}><path d="M8 3 V13 M3 8 H13" strokeWidth="1.6" /></Icon>;
 export const Minus = (p) => <Icon {...p}><path d="M3 8 H13" strokeWidth="1.6" /></Icon>;

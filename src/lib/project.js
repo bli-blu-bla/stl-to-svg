@@ -8,12 +8,13 @@
 
 import polygonClipping from 'polygon-clipping';
 import { chainSegments, simplify, signedArea } from './geom2d.js';
+import { tracePath, drawable } from './arcs.js';
 
 const { union } = polygonClipping;
 
 export const EXACT_TRIANGLE_LIMIT = 60000;
 
-export function projectMesh(positions, basis, tolerance, quality = 'auto', onProgress) {
+export function projectMesh(positions, basis, tolerance, quality = 'auto', onProgress, arcs = false) {
   const tris = projectTriangles(positions, basis, tolerance);
   if (!tris.length) return [];
 
@@ -25,12 +26,12 @@ export function projectMesh(positions, basis, tolerance, quality = 'auto', onPro
     const rings = unionTriangles(tris, onProgress);
     if (rings) {
       return rings
-        .map((r) => ({ closed: true, points: simplify(r, tolerance, true) }))
-        .filter((p) => p.points.length >= 3);
+        .map((r) => tracePath(r, true, tolerance, arcs))
+        .filter(drawable);
     }
     // Fall through to the raster path if the boolean union gave up.
   }
-  return rasterOutline(tris, tolerance);
+  return rasterOutline(tris, tolerance, arcs);
 }
 
 // Project each triangle to plane 2D, dropping ones that collapse to a line.
@@ -93,7 +94,7 @@ function unionTriangles(tris, onProgress) {
 
 // --- Raster fallback -------------------------------------------------------
 
-function rasterOutline(tris, tolerance) {
+function rasterOutline(tris, tolerance, arcs) {
   let minX = Infinity; let minY = Infinity; let maxX = -Infinity; let maxY = -Infinity;
   for (const t of tris) {
     for (const p of t) {
@@ -151,8 +152,11 @@ function rasterOutline(tris, tolerance) {
 
   if (!segments.length) return [];
   return chainSegments(segments, cell * 1e-3)
-    .map((p) => ({ closed: p.closed, points: simplify(p.points, tolerance, p.closed) }))
-    .filter((p) => p.points.length >= 3 && Math.abs(signedArea(p.points)) > tolerance * tolerance);
+    .filter((p) => p.points.length >= 3 && Math.abs(signedArea(p.points)) > tolerance * tolerance)
+    // The grid leaves a staircase, not vertices on the curve: smooth it to
+    // within half a cell before looking for arcs in it.
+    .map((p) => tracePath(arcs ? simplify(p.points, cell, p.closed) : p.points, p.closed, tolerance, arcs))
+    .filter((p) => drawable(p) && (p.arcs || p.circle || p.points.length >= 3));
 }
 
 // Mark every grid sample whose position falls inside the triangle.

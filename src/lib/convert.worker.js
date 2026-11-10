@@ -22,13 +22,14 @@ self.onmessage = (e) => {
   try {
     const basis = basisFor(settings.planeKey, settings.customNormal);
     const tolerance = settings.resolution;
+    const arcs = settings.arcs !== false;
 
     progress(settings.mode === 'intersection' ? 'Slicing' : 'Projecting', 0);
     const paths = settings.mode === 'intersection'
-      ? sliceMesh(positions, basis, settings.offset, tolerance)
+      ? sliceMesh(positions, basis, settings.offset, tolerance, arcs)
       : settings.detail === 'edges'
-        ? projectEdges(positions, basis, tolerance, settings.edgeAngle, progress)
-        : projectMesh(positions, basis, tolerance, settings.quality, progress);
+        ? projectEdges(positions, basis, tolerance, settings.edgeAngle, progress, arcs)
+        : projectMesh(positions, basis, tolerance, settings.quality, progress, arcs);
 
     if (!paths.length) {
       self.postMessage({ id, error: settings.mode === 'intersection'
@@ -51,7 +52,9 @@ self.onmessage = (e) => {
       stats: {
         paths: paths.length,
         closed: paths.filter((p) => p.closed).length,
-        vertices: paths.reduce((a, p) => a + p.points.length, 0),
+        vertices: paths.reduce((a, p) => a + (p.circle ? 0 : p.points.length), 0),
+        arcs: paths.reduce((a, p) => a + (p.arcs ? p.arcs.filter(Boolean).length : 0), 0),
+        circles: paths.filter((p) => p.circle).length,
         ms: Math.round(performance.now() - t0),
       },
     });

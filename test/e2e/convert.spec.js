@@ -80,6 +80,20 @@ test('intersection mode slices a torus into two closed rings', async ({ page }) 
   const svg = await page.locator('.result-card img').getAttribute('src');
   const text = await page.evaluate((u) => fetch(u).then((r) => r.text()), svg);
   expect(text).toContain('<svg');
+  // Both rings are recognised as circles and written as such.
+  expect((text.match(/<circle/g) || []).length).toBe(2);
+  await expect(page.locator('.result-card .stats')).toContainText('2 circles');
+});
+
+test('with arcs and circles turned off the rings are plain paths', async ({ page }) => {
+  await upload(page, TORUS);
+  await page.getByRole('checkbox', { name: 'Arcs and circles' }).uncheck();
+  await convert(page);
+  await expect(page.locator('.result-card .stats')).toContainText('2 paths');
+
+  const svg = await page.locator('.result-card img').getAttribute('src');
+  const text = await page.evaluate((u) => fetch(u).then((r) => r.text()), svg);
+  expect(text).not.toContain('<circle');
   expect((text.match(/<path/g) || []).length).toBe(2);
 });
 
@@ -436,4 +450,39 @@ test('open files survive a reload, but not into a new tab', async ({ page, conte
   await other.goto(page.url());
   await expect(other.locator('main[data-restored]')).toBeVisible();
   await expect(other.locator('.file-row')).toHaveCount(0);
+});
+
+test('circle and gap tools measure a ring', async ({ page }) => {
+  // The torus section is two circles about one centre: radius 20 and 10.
+  await upload(page, TORUS);
+  await convert(page);
+  await page.getByRole('button', { name: 'Measure' }).click();
+  const view = page.getByRole('dialog', { name: 'Measure SVG' });
+  await expect(view.locator('.measure-size')).toHaveText('40.00 × 40.00 mm');
+
+  // Screen position of a point given as fractions of the drawing's bounds.
+  const at = (fx, fy) => page.evaluate(([fx, fy]) => {
+    const r = document.querySelector('[data-testid=measure-canvas] .m-bounds');
+    const m = r.getScreenCTM();
+    const x = +r.getAttribute('x') + fx * +r.getAttribute('width');
+    const y = +r.getAttribute('y') + fy * +r.getAttribute('height');
+    return { x: m.a * x + m.e, y: m.d * y + m.f };
+  }, [fx, fy]);
+  const click = async (p) => page.mouse.click(p.x, p.y);
+
+  await view.getByRole('radio', { name: 'Circle' }).click();
+  await click(await at(0.5, 0)); // top of the outer circle
+  await expect(view.locator('.measure-list li')).toHaveCount(1);
+  await expect(view.locator('.measure-list li').first()).toContainText('⌀ 40.00 mm');
+  await expect(view.locator('.measure-list li').first()).toContainText('R 20.00 mm');
+  await click(await at(0.5, 0.5)); // empty space: nothing to measure
+  await expect(view.locator('.measure-list li')).toHaveCount(1);
+
+  await page.keyboard.press('g');
+  await expect(view.getByRole('radio', { name: 'Gap' })).toHaveAttribute('aria-checked', 'true');
+  await click(await at(1, 0.5)); // outer circle, right
+  await click(await at(0.75, 0.5)); // inner circle, right
+  await expect(view.locator('.measure-list li')).toHaveCount(2);
+  await expect(view.locator('.measure-list li').nth(1)).toContainText('10.00 mm');
+  await expect(view.locator('.measure-list li').nth(1)).toContainText('Gap');
 });

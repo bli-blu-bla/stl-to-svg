@@ -64,7 +64,11 @@ function ResultCard({ cut: r, onZoom, onDownload, onMeasure, onRemove }) {
         <div className="cut-label">{r.label}</div>
         {r.stats && (
           <div className="stats">
-            {r.stats.paths} path{r.stats.paths === 1 ? '' : 's'} · {r.stats.vertices} points · {r.stats.ms} ms
+            {r.stats.paths} path{r.stats.paths === 1 ? '' : 's'}
+            {r.stats.vertices > 0 && ` · ${r.stats.vertices} points`}
+            {r.stats.arcs > 0 && ` · ${r.stats.arcs} arc${r.stats.arcs === 1 ? '' : 's'}`}
+            {r.stats.circles > 0 && ` · ${r.stats.circles} circle${r.stats.circles === 1 ? '' : 's'}`}
+            {` · ${r.stats.ms} ms`}
           </div>
         )}
         <div className="btns">

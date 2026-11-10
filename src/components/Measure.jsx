@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  alignPoint, angleAt, formatAngle, formatLength, lineAngle, measureBetween, parseSVG, rayAlign, rayHit, snapAngle, snapPoint,
+  alignPoint, angleAt, arcAt, closestGap, curveHit, formatAngle, formatLength, lineAngle, measureBetween, parseSVG, rayAlign, rayHit, snapAngle, snapPoint,
 } from '../lib/measure.js';
-import { Angle, Back, Distance, Minus, Plus, Snap45 } from './Icons.jsx';
+import { Angle, Back, Circle, Distance, Gap, Minus, Plus, Snap45 } from './Icons.jsx';
 
 const SNAP_PX = 10;
 const ALIGN_PX = 7; // Tighter than SNAP_PX: tracking should help, not grab.
@@ -12,12 +12,26 @@ const DRAG_PX = 4;
 const MIN_ZOOM_PX = 0.02; // Guard rails so the wheel cannot zoom into nothing.
 const MAX_ZOOM_PX = 20000;
 const DOUBLE_ESC_MS = 500; // A single Esc never closes the view — it takes two in a row.
-// Clicks needed per tool: distance = start, end; angle = vertex, leg, leg.
-const NEEDS = { distance: 2, angle: 3 };
+const CURVE_PX = 14; // The gap and circle tools pick whole curves: a wider catch.
+// Clicks needed per tool: distance = start, end; angle = vertex, leg, leg;
+// gap = one curve, the other; circle = the circle or arc itself.
+const NEEDS = { distance: 2, angle: 3, gap: 2, circle: 1 };
 const STEPS = {
   distance: ['Click the start point', 'Click the end point'],
   angle: ['Click the vertex', 'Click a point on the first leg', 'Click a point on the second leg'],
+  gap: ['Click a curve near the narrow spot', 'Click the curve opposite — the narrowest place nearby is measured'],
+  circle: ['Click a circle or an arc'],
 };
+const TOOLS = [
+  ['distance', 'Distance', 'D', Distance],
+  ['angle', 'Angle', 'A', Angle],
+  ['gap', 'Gap', 'G', Gap],
+  ['circle', 'Circle', 'C', Circle],
+];
+
+// The measurement a click on an arc gives: centre, the point clicked, and
+// whether the curve is a whole circle (diameter) or only an arc (radius).
+const circleMark = (p) => ({ type: 'circle', pts: [{ x: p.arc.cx, y: p.arc.cy }, { x: p.x, y: p.y }], full: p.arc.full });
 
 // Measurement ids stay unique across openings of the view.
 let nextMeasureId = 1;
@@ -27,8 +41,8 @@ let nextMeasureId = 1;
 export default function Measure({ items, activeId, onSelect, onClose, store, setStore, prefs, setPrefs }) {
   const active = items.find((i) => i.id === activeId) || null;
   const svgText = active?.svg || null;
-  const geom = useMemo(() => (svgText ? parseSVG(svgText) : null), [svgText]);
-  const unit = geom?.unit || 'mm';
+  const drawing = useMemo(() => (svgText ? parseSVG(svgText) : null), [svgText]);
+  const unit = drawing?.unit || 'mm';
 
   // Measurements per file, discarded when that file's SVG is regenerated.
   const entry = store[activeId];
@@ -40,6 +54,13 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
       return { ...prev, [activeId]: { svg: svgText, list: fn(base) } };
     });
   }, [activeId, svgText, setStore]);
+
+  // The centre of every measured circle becomes a point to snap to, so the
+  // distance between two arcs' centres is two clicks away.
+  const geom = useMemo(() => {
+    const centres = list.filter((m) => m.type === 'circle').flatMap((m) => [m.pts[0].x, m.pts[0].y]);
+    return drawing && centres.length ? { ...drawing, vertices: drawing.vertices.concat(centres) } : drawing;
+  }, [drawing, list]);
 
   const { tool, lock45 } = prefs;
   const setTool = useCallback((t) => setPrefs((p) => ({ ...p, tool: t })), [setPrefs]);
@@ -57,7 +78,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
   const [escArmed, setEscArmed] = useState(false);
 
   // Fit the drawing whenever another SVG is shown.
-  const fit = useCallback(() => { if (geom) setView(fitView(geom)); }, [geom]);
+  const fit = useCallback(() => { if (drawing) setView(fitView(drawing)); }, [drawing]);
   useEffect(() => { fit(); setPts([]); setHover(null); }, [fit]);
 
   const chooseTool = (t) => { setTool(t); setPts([]); };
@@ -100,7 +121,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
 
   const [copied, setCopied] = useState(false);
   const copyAll = async () => {
-    const lines = list.map((m, i) => `${i + 1}. ${summaryText(m, unit)}`);
+    const lines = list.map((m, i) => `${i + 1}. ${summaryText(m, unit, b)}`);
     try {
       await navigator.clipboard.writeText(`${active?.name}${active?.label ? ` — ${active.label}` : ''}\n${lines.join('\n')}\n`);
       setCopied(true);
@@ -124,6 +145,13 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
     if (!raw || !geom) return null;
     const tol = SNAP_PX / ppu;
     const alignTol = ALIGN_PX / ppu;
+    if (tool === 'gap' || tool === 'circle') {
+      // These tools pick a curve, not a point on the grid.
+      const hit = curveHit(geom, raw.x, raw.y, CURVE_PX / ppu);
+      const arc = tool === 'circle' ? arcAt(geom, hit) : null;
+      if (!hit || (tool === 'circle' && !arc)) return { ...raw, kind: null };
+      return { x: hit.x, y: hit.y, kind: 'edge', hit, arc };
+    }
     const anchor = pts[0];
     if (anchor && lock45 !== e.shiftKey) {
       const locked = snapAngle(anchor, raw);
@@ -138,7 +166,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
     return snapPoint(geom, raw.x, raw.y, tol)
       || alignPoint(geom, raw.x, raw.y, alignTol, pts)
       || { ...raw, kind: null };
-  }, [toDrawing, geom, ppu, pts, lock45]);
+  }, [toDrawing, geom, ppu, pts, lock45, tool]);
 
   // Zoom around the cursor. Registered by hand: React's wheel listener is passive.
   useEffect(() => {
@@ -190,6 +218,20 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
     if (!d || d.moved || d.button !== 0) return;
     const p = resolve(e);
     if (!p) return;
+    if (tool === 'circle') {
+      if (p.arc) setList((l) => [...l, { id: nextMeasureId++, ...circleMark(p) }]);
+      return;
+    }
+    if (tool === 'gap') {
+      if (!p.hit) return;
+      if (!pts.length) { setPts([{ x: p.x, y: p.y, hit: p.hit }]); return; }
+      const ends = closestGap(geom, pts[0].hit, p.hit);
+      // Two picks on one unbroken curve slide together: nothing to measure.
+      if (Math.hypot(ends[0].x - ends[1].x, ends[0].y - ends[1].y) < 1e-6) return;
+      setList((l) => [...l, { id: nextMeasureId++, type: 'gap', pts: ends }]);
+      setPts([]);
+      return;
+    }
     // A second click on the same spot would give a zero-length leg.
     if (pts.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 1e-9)) return;
     const point = { x: p.x, y: p.y };
@@ -233,8 +275,8 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
         else setList((l) => l.slice(0, -1));
       } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         const k = e.key.toLowerCase();
-        if (k === 'd') { setTool('distance'); setPts([]); }
-        else if (k === 'a') { setTool('angle'); setPts([]); }
+        const picked = TOOLS.find(([, , key]) => key.toLowerCase() === k);
+        if (picked) { setTool(picked[0]); setPts([]); }
         else if (k === 's') setLock45((v) => !v);
       }
     };
@@ -245,7 +287,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
       window.removeEventListener('keydown', onKey);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [pts, onClose, setList, refreshHover]);
+  }, [pts, onClose, setList, setTool, setLock45, refreshHover]);
 
   // The "press Esc again" hint disappears once the double-press window closes.
   useEffect(() => {
@@ -269,7 +311,15 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
 
   const px = (n) => n / ppu; // Screen pixels → drawing units, for constant-size overlays.
   const b = geom?.bounds;
-  const live = hover && pts.length ? [...pts, hover] : null;
+  // The measurement the next click would give, drawn while hovering.
+  let live = null;
+  if (hover && tool === 'circle') {
+    if (hover.arc) live = circleMark(hover);
+  } else if (hover && tool === 'gap') {
+    if (pts.length && hover.hit) live = { type: 'gap', pts: closestGap(geom, pts[0].hit, hover.hit) };
+  } else if (hover && pts.length) {
+    live = { type: tool, pts: [...pts, hover] };
+  }
   const far = view ? (view.w + view.h) * 2 : 0;
   const dims = (g) => `${formatLength(g.bounds.width, g.unit).split(' ')[0]} × ${formatLength(g.bounds.height, g.unit)}`;
 
@@ -284,7 +334,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
         </div>
         <div className="measure-tools">
           <div className="tool-seg" role="radiogroup" aria-label="Measuring tool">
-            {[['distance', 'Distance', 'D', Distance], ['angle', 'Angle', 'A', Angle]].map(([t, label, key, Ico]) => (
+            {TOOLS.map(([t, label, key, Ico]) => (
               <button key={t} role="radio" aria-checked={tool === t} onClick={() => chooseTool(t)} title={`${label} (${key})`}>
                 <Ico /> {label} <kbd aria-hidden="true">{key}</kbd>
               </button>
@@ -341,7 +391,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
               {list.map((m, i) => (
                 <Mark key={m.id} m={m} n={i + 1} unit={unit} px={px} hot={highlight === m.id} />
               ))}
-              {live && <Mark m={{ type: tool, pts: live }} unit={unit} px={px} live />}
+              {live && <Mark m={live} unit={unit} px={px} live />}
 
               {pts.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={px(5)} className="m-end live" />)}
               {hover && hover.kind === 'vertex' && (
@@ -427,7 +477,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
                 {list.map((m, i) => (
                   <li key={m.id} onMouseEnter={() => setHighlight(m.id)} onMouseLeave={() => setHighlight(null)}>
                     <span className="idx">{i + 1}</span>
-                    <MarkSummary m={m} unit={unit} />
+                    <MarkSummary m={m} unit={unit} bounds={b} />
                     <button
                       className="btn icon"
                       aria-label={`Delete measurement ${i + 1}`}
@@ -439,7 +489,7 @@ export default function Measure({ items, activeId, onSelect, onClose, store, set
                 ))}
               </ol>
             ) : (
-              <p className="measure-none">No measurements yet — click two points on the drawing.</p>
+              <p className="measure-none">No measurements yet — click two points on the drawing, or pick the Gap or Circle tool and click a curve.</p>
             )}
 
             <div className="shortcuts">
@@ -463,17 +513,39 @@ function fitView(geom) {
   return { x: b.minX - pad, y: b.minY - pad, w: b.width + 2 * pad, h: b.height + 2 * pad };
 }
 
-function summaryText(m, unit) {
+// Where a circle's centre is, measured like the status bar does: from the
+// drawing's left and bottom edge.
+function centreText(c, unit, b) {
+  return `x ${formatLength(c.x - b.minX, unit).split(' ')[0]} · y ${formatLength(b.maxY - c.y, unit)}`;
+}
+
+function summaryText(m, unit, bounds) {
+  if (m.type === 'circle') {
+    const r = measureBetween(m.pts[0], m.pts[1]).length;
+    const size = m.full ? `⌀ ${formatLength(2 * r, unit)} (circle, R ${formatLength(r, unit)}` : `R ${formatLength(r, unit)} (arc, ⌀ ${formatLength(2 * r, unit)}`;
+    return `${size}, centre ${centreText(m.pts[0], unit, bounds)})`;
+  }
   if (m.type === 'angle') {
     const [v, a, b] = m.pts;
     return `${formatAngle(angleAt(v, a, b))} (angle, legs ${formatLength(measureBetween(v, a).length, unit)} / ${formatLength(measureBetween(v, b).length, unit)})`;
   }
   const [a, b] = m.pts;
   const r = measureBetween(a, b);
-  return `${formatLength(r.length, unit)} (Δx ${formatLength(r.dx, unit)}, Δy ${formatLength(r.dy, unit)}, ∠ ${formatAngle(lineAngle(a, b))})`;
+  return `${formatLength(r.length, unit)} (${m.type === 'gap' ? 'gap, ' : ''}Δx ${formatLength(r.dx, unit)}, Δy ${formatLength(r.dy, unit)}, ∠ ${formatAngle(lineAngle(a, b))})`;
 }
 
-function MarkSummary({ m, unit }) {
+function MarkSummary({ m, unit, bounds }) {
+  if (m.type === 'circle') {
+    const r = measureBetween(m.pts[0], m.pts[1]).length;
+    return (
+      <div className="v">
+        <strong>{m.full ? `⌀ ${formatLength(2 * r, unit)}` : `R ${formatLength(r, unit)}`}</strong>
+        <div className="d">
+          {m.full ? `Circle · R ${formatLength(r, unit)}` : `Arc · ⌀ ${formatLength(2 * r, unit)}`} · centre {centreText(m.pts[0], unit, bounds)}
+        </div>
+      </div>
+    );
+  }
   if (m.type === 'angle') {
     const [v, a, b] = m.pts;
     return (
@@ -490,7 +562,7 @@ function MarkSummary({ m, unit }) {
   return (
     <div className="v">
       <strong>{formatLength(r.length, unit)}</strong>
-      <div className="d">Δx {formatLength(r.dx, unit)} · Δy {formatLength(r.dy, unit)} · ∠ {formatAngle(lineAngle(a, b))}</div>
+      <div className="d">{m.type === 'gap' ? 'Gap · ' : ''}Δx {formatLength(r.dx, unit)} · Δy {formatLength(r.dy, unit)} · ∠ {formatAngle(lineAngle(a, b))}</div>
     </div>
   );
 }
@@ -523,6 +595,25 @@ function Mark({ m, n, unit, px, hot, live }) {
   const prefix = n ? `${n} · ` : '';
   const ends = (points) => points.map((q, i) => <circle key={i} cx={q.x} cy={q.y} r={px(4.5)} className="m-end" vectorEffect="non-scaling-stroke" />);
   const leg = (a, b, key) => <line key={key} x1={a.x} y1={a.y} x2={b.x} y2={b.y} vectorEffect="non-scaling-stroke" />;
+
+  if (m.type === 'circle') {
+    // The whole circle the curve lies on, its centre, and the dimension: a
+    // diameter across a full circle, a radius out to an arc.
+    const [c, p] = m.pts;
+    const r = measureBetween(c, p).length;
+    const from = m.full ? { x: 2 * c.x - p.x, y: 2 * c.y - p.y } : c;
+    const text = prefix + (m.full ? `⌀ ${formatLength(2 * r, unit)}` : `R ${formatLength(r, unit)}`);
+    const k = px(5);
+    return (
+      <g className={cls}>
+        <circle className="m-arc m-circle" cx={c.x} cy={c.y} r={r} vectorEffect="non-scaling-stroke" />
+        {leg(from, p)}
+        <path className="m-arc" vectorEffect="non-scaling-stroke" d={`M ${c.x - k} ${c.y} H ${c.x + k} M ${c.x} ${c.y - k} V ${c.y + k}`} />
+        {ends(m.full ? [from, p] : [p])}
+        <Pill x={(c.x + p.x) / 2} y={(c.y + p.y) / 2} text={text} px={px} outline={!m.full} />
+      </g>
+    );
+  }
 
   if (m.type === 'angle') {
     const [v, a, b] = m.pts;
